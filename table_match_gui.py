@@ -114,8 +114,11 @@ def run_match(src_path, tgt_path, src_key, tgt_key, fill_map, sku_col, remark_co
         if progress_cb and total % 10 == 0:
             progress_cb(total)
 
-    swb.save(src_path)  # 直接保存源表(或副本)
-    return matched, multi, notfound
+    # 另存加后缀, 不修改源文件
+    base, ext = os.path.splitext(src_path)
+    out_path = f"{base}_结果{ext}"
+    swb.save(out_path)
+    return matched, multi, notfound, out_path
 
 
 # ============ GUI ============
@@ -215,19 +218,19 @@ class App:
         self.run_btn.config(state="disabled")
         self.log_write("▶ 开始核对...")
         try:
-            matched, multi, notfound = run_match(
+            matched, multi, notfound, out_path = run_match(
                 src, tgt, self.sk.get().strip(), self.tk.get().strip(),
                 fill_map, self.sku_col.get().strip() or None,
                 self.rmk_col.get().strip() or None, self.skip_existing.get())
             self.log_write(f"✅ 匹配: {matched}, 多规格标记: {multi}, 未匹配: {len(notfound)}")
-            self.log_write(f"   结果已保存到源表 (同文件)")
+            self.log_write(f"   已另存(源文件未修改): {os.path.basename(out_path)}")
             if notfound:
                 self.log_write(f"\n⚠️ 未匹配清单 ({len(notfound)}):")
                 for v in notfound[:50]:
                     self.log_write(f"   {v}")
                 if len(notfound) > 50:
                     self.log_write(f"   ... 等 {len(notfound)} 个")
-            messagebox.showinfo("成功", f"核对完成!\n匹配 {matched}\n多规格 {multi}\n未匹配 {len(notfound)}")
+            messagebox.showinfo("成功", f"核对完成!\n匹配 {matched}\n多规格 {multi}\n未匹配 {len(notfound)}\n\n已另存: {os.path.basename(out_path)}\n(源文件未修改)")
         except Exception as e:
             self.log_write(f"❌ 错误: {e}")
             messagebox.showerror("错误", str(e))

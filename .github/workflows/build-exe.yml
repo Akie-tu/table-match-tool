@@ -32,11 +32,31 @@ jobs:
         run: |
           powershell -Command "Compress-Archive -Path table_match_tool.py -DestinationPath table-match-cli.zip -Force"
 
+      - name: Get version tag
+        id: ver
+        run: echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Extract update log (last commit message)
+        id: log
+        shell: bash
+        run: |
+          MSG=$(git log -1 --pretty=%s)
+          echo "body=## 更新日志 (v${{ steps.ver.outputs.tag }})
+          
+          $MSG
+
+          ### 下载
+          - **table-match-gui.exe** — GUI版（单文件双击运行）
+          - **table-match-cli.zip** — CLI/交互版（解压运行）
+          
+          " > body_file.txt
+          echo "Done"
+
       - name: Upload assets to Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
-          generate_release_notes: true
+          body_path: body_file.txt
           files: |
             dist/table-match-gui.exe
             table-match-cli.zip
