@@ -361,6 +361,16 @@ class App:
 
 def main():
     root = tk.Tk()
+    # 设置窗口/任务栏图标 (打包时 --add-data 附带 app.ico)
+    try:
+        if getattr(sys, "frozen", False):
+            icon_path = os.path.join(sys._MEIPASS, "app.ico")
+        else:
+            icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "app.ico")
+        if os.path.exists(icon_path):
+            root.iconbitmap(icon_path)
+    except Exception:
+        pass
     try:
         ttk.Style().theme_use("clam")
     except Exception:
