@@ -1,0 +1,43 @@
+name: Build EXE on Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install deps
+        run: |
+          pip install pyinstaller openpyxl
+
+      - name: Build GUI EXE (single-file)
+        run: |
+          pyinstaller --onefile --windowed --name table-match-gui table_match_gui.py
+
+      - name: Build CLI EXE
+        run: |
+          pyinstaller --onefile --name table-match-cli table_match_tool.py
+
+      - name: Get tag name
+        id: tag
+        shell: bash
+        run: echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Upload assets to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: |
+            dist/table-match-gui.exe
+            dist/table-match-cli.exe
+          fail_on_unmatched_files: false
