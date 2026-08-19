@@ -27,14 +27,10 @@ jobs:
         run: |
           pyinstaller --onefile --windowed --name table-match-gui table_match_gui.py
 
-      - name: Build CLI EXE
-        run: |
-          pyinstaller --onefile --name table-match-cli table_match_tool.py
-
-      - name: Get tag name
-        id: tag
+      - name: Package CLI as zip
         shell: bash
-        run: echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+        run: |
+          powershell -Command "Compress-Archive -Path table_match_tool.py -DestinationPath table-match-cli.zip -Force"
 
       - name: Upload assets to Release
         uses: softprops/action-gh-release@v2
@@ -43,5 +39,5 @@ jobs:
           generate_release_notes: true
           files: |
             dist/table-match-gui.exe
-            dist/table-match-cli.exe
+            table-match-cli.zip
           fail_on_unmatched_files: false
