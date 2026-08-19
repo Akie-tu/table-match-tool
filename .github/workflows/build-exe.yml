@@ -21,7 +21,7 @@ jobs:
 
       - name: Install deps
         run: |
-          pip install pyinstaller openpyxl
+          pip install pyinstaller openpyxl pillow
 
       - name: Build GUI EXE (single-file)
         run: |
