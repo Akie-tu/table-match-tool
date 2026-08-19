@@ -153,7 +153,8 @@ class App:
         frm3.pack(fill="x", padx=10, pady=5)
         self.map_rows = []
         self._add_row(frm3)
-        ttk.Button(frm3, text="+ 添加映射", command=lambda: self._add_row(frm3)).grid(row=100, column=0, pady=3)
+        self.add_btn = ttk.Button(frm3, text="+ 添加映射", command=lambda: self._add_row(frm3))
+        self.add_btn.pack(anchor="w", padx=10, pady=3)
 
         # --- 多规格 ---
         frm4 = ttk.LabelFrame(root, text="4. 多规格标记 (可空)")
