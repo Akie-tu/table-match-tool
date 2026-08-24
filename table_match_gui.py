@@ -16,6 +16,7 @@ Tab3 开票生成: 数电发票批量开票模板生成(流水号自动+固定�
 纯 tkinter 标准库 + openpyxl + Pillow
 """
 import os
+import re
 import sys
 import shutil
 import tkinter as tk
@@ -199,7 +200,7 @@ def run_imgconvert(src_root, out_root, progress_cb=None):
 class App:
     def __init__(self, root):
         self.root = root
-        root.title("电商工具 v6.1.5")
+        root.title("电商工具 v6.1.6")
         root.geometry("780x700")
         root.minsize(700, 620)
 
@@ -293,7 +294,7 @@ class App:
         tab = ttk.Frame(self.nb)
         self.nb.add(tab, text="③ 开票生成")
 
-        # 0. 固定内容配置 (分两行, 避免超出窗口)
+        # 0. 固定内容配置 (多行grid, 不挤宽度, 窗口可扩大)
         frm0 = ttk.LabelFrame(tab, text="固定内容 (可修改, 通常不用动)")
         frm0.pack(fill="x", padx=10, pady=5)
         self.inv_type = tk.StringVar(value=DEFAULT_FIXED["invoice_type"])
@@ -302,33 +303,33 @@ class App:
         self.inv_code = tk.StringVar(value=DEFAULT_FIXED["tax_code"])
         self.inv_unit = tk.StringVar(value=DEFAULT_FIXED["unit"])
         self.inv_rate = tk.StringVar(value=DEFAULT_FIXED["tax_rate"])
-        # 第一行: 固定内容
-        row0 = ttk.Frame(frm0)
-        row0.pack(fill="x", padx=4, pady=2)
-        ttk.Label(row0, text="发票类型:").pack(side="left", padx=(4, 2))
-        ttk.Combobox(row0, textvariable=self.inv_type, values=INVOICE_TYPE_OPTIONS,
-                     width=10, state="readonly").pack(side="left", padx=2)
-        ttk.Label(row0, text="含税:").pack(side="left", padx=8)
-        ttk.Combobox(row0, textvariable=self.inv_taxinc, values=["是", "否"],
-                     width=3, state="readonly").pack(side="left", padx=2)
-        ttk.Label(row0, text="项目:").pack(side="left", padx=8)
-        ttk.Entry(row0, textvariable=self.inv_item, width=8).pack(side="left", padx=2)
-        ttk.Label(row0, text="税收编码:").pack(side="left", padx=8)
-        ttk.Entry(row0, textvariable=self.inv_code, width=20).pack(side="left", padx=2)
-        ttk.Label(row0, text="单位:").pack(side="left", padx=8)
-        ttk.Entry(row0, textvariable=self.inv_unit, width=3).pack(side="left", padx=2)
-        ttk.Label(row0, text="税率:").pack(side="left", padx=8)
-        ttk.Entry(row0, textvariable=self.inv_rate, width=4).pack(side="left", padx=2)
-        # 第二行: 模板
-        row1 = ttk.Frame(frm0)
-        row1.pack(fill="x", padx=4, pady=2)
+        # grid 布局: 每行3组 (标签+控件)
+        row = 0
+        ttk.Label(frm0, text="发票类型:").grid(row=row, column=0, sticky="e", padx=(8, 2), pady=3)
+        ttk.Combobox(frm0, textvariable=self.inv_type, values=INVOICE_TYPE_OPTIONS,
+                     width=12, state="readonly").grid(row=row, column=1, sticky="w", padx=(0, 10), pady=3)
+        ttk.Label(frm0, text="是否含税:").grid(row=row, column=2, sticky="e", padx=(8, 2), pady=3)
+        ttk.Combobox(frm0, textvariable=self.inv_taxinc, values=["是", "否"],
+                     width=4, state="readonly").grid(row=row, column=3, sticky="w", padx=(0, 10), pady=3)
+        ttk.Label(frm0, text="项目名称:").grid(row=row, column=4, sticky="e", padx=(8, 2), pady=3)
+        ttk.Entry(frm0, textvariable=self.inv_item, width=10).grid(row=row, column=5, sticky="w", padx=(0, 10), pady=3)
+        row += 1
+        ttk.Label(frm0, text="税收编码:").grid(row=row, column=0, sticky="e", padx=(8, 2), pady=3)
+        ttk.Entry(frm0, textvariable=self.inv_code, width=22).grid(row=row, column=1, sticky="w", padx=(0, 10), pady=3)
+        ttk.Label(frm0, text="单位:").grid(row=row, column=2, sticky="e", padx=(8, 2), pady=3)
+        ttk.Entry(frm0, textvariable=self.inv_unit, width=4).grid(row=row, column=3, sticky="w", padx=(0, 10), pady=3)
+        ttk.Label(frm0, text="税率:").grid(row=row, column=4, sticky="e", padx=(8, 2), pady=3)
+        ttk.Entry(frm0, textvariable=self.inv_rate, width=6).grid(row=row, column=5, sticky="w", padx=(0, 10), pady=3)
+        row += 1
         self.inv_tpl = tk.StringVar(value="")
-        ttk.Label(row1, text="开票模板:").pack(side="left", padx=(4, 2))
-        ttk.Entry(row1, textvariable=self.inv_tpl, width=60).pack(side="left", padx=2, fill="x", expand=True)
-        ttk.Button(row1, text="浏览…", command=lambda: self.pick(self.inv_tpl)).pack(side="left", padx=4)
+        ttk.Label(frm0, text="开票模板:").grid(row=row, column=0, sticky="e", padx=(8, 2), pady=3)
+        ttk.Entry(frm0, textvariable=self.inv_tpl, width=38).grid(row=row, column=1, columnspan=3, sticky="we", padx=(0, 6), pady=3)
+        ttk.Button(frm0, text="浏览…", command=lambda: self.pick(self.inv_tpl)).grid(row=row, column=4, sticky="w", padx=(0, 8), pady=3)
+        frm0.columnconfigure(1, weight=1)
+        frm0.columnconfigure(3, weight=1)
 
         # 1. 可编辑发票表格 (每行一个输入框 = 每行一张发票)
-        frm2 = ttk.LabelFrame(tab, text="发票录入表 — 双击单元格填写, 或从Excel整块复制后直接 Ctrl+V 粘贴 (每行一张发票)")
+        frm2 = ttk.LabelFrame(tab, text="发票录入表 — 双击单元格填写; 点选某列后Ctrl+V只粘该列; 整块复制自动对齐 (每行一张发票)")
         frm2.pack(fill="both", expand=True, padx=10, pady=5)
         cols = ("serial", "buyer", "taxid", "natural", "qty", "amount", "remark")
         self.inv_tree = ttk.Treeview(frm2, columns=cols, show="headings", height=14)
@@ -341,15 +342,27 @@ class App:
             self.inv_tree.column(c, width=widths[c], anchor="w")
         vsb = ttk.Scrollbar(frm2, orient="vertical", command=self.inv_tree.yview)
         self.inv_tree.configure(yscrollcommand=vsb.set)
+        # 网格线样式(横线+竖线分隔)
+        try:
+            st = ttk.Style(self.root)
+            st.configure("Inv.Treeview", rowheight=26,
+                         bordercolor="#777777", lightcolor="#777777", darkcolor="#777777")
+            st.configure("Inv.Treeview.Heading", bordercolor="#888888",
+                         lightcolor="#888888", darkcolor="#888888")
+            self.inv_tree.configure(style="Inv.Treeview")
+        except Exception:
+            pass
         self.inv_tree.pack(side="left", fill="both", expand=True, padx=(5, 0), pady=5)
         vsb.pack(side="right", fill="y", pady=5)
         self.invoices = []  # 数据模型: [{buyer,tax_id,is_natural,qty,amount,remark}]
         self._inv_editing = None  # 当前编辑状态 (entry, row_id, col_idx)
+        self._inv_click_col = None  # 粘贴目标列(点选记录) 0=名称 1=税号 2=自然人 3=数量 4=金额 5=备注
 
-        # 双击编辑 + Ctrl+V 粘贴绑定
+        # 双击编辑 + Ctrl+V 粘贴 + 单击记录列 绑定
         self.inv_tree.bind("<Double-1>", self.inv_cell_double_click)
         self.inv_tree.bind("<Control-v>", self.inv_paste)
         self.inv_tree.bind("<Control-V>", self.inv_paste)
+        self.inv_tree.bind("<Button-1>", self.inv_click_col)
 
         # 2. 操作按钮
         frm3 = ttk.Frame(tab)
@@ -382,6 +395,20 @@ class App:
             except Exception:
                 pass
             self._inv_editing = None
+
+    def inv_click_col(self, event):
+        """单击单元格 → 记录目标列(粘贴时只粘到该列)"""
+        region = self.inv_tree.identify("region", event.x, event.y)
+        if region != "cell":
+            return
+        col_id = self.inv_tree.identify_column(event.x)
+        if not col_id:
+            return
+        col_idx = int(col_id.replace("#", "")) - 1
+        if col_idx <= 0:  # 流水号列忽略
+            return
+        map_col = {"#2": 0, "#3": 1, "#4": 2, "#5": 3, "#6": 4, "#7": 5}
+        self._inv_click_col = map_col.get(col_id, None)
 
     def inv_cell_double_click(self, event):
         """双击单元格 → 就地编辑 (流水号列只读)"""
@@ -439,9 +466,15 @@ class App:
         if not data:
             return "break"
         rows = [r.split("\t") for r in data.replace("\r\n", "\n").replace("\r", "\n").split("\n")]
-        # 清洗: 去掉每个单元格首尾空白/\t/引号/多余符号
-        rows = [[c.strip().strip('"\'').replace("\u00a0", " ").strip() for c in r]
-                for r in rows if any(c.strip() for c in r)]
+        # 清洗: 去掉每个单元格首尾空白/\t/引号/多余符号; 并裁掉每行末尾空单元格
+        cleaned = []
+        for r in rows:
+            rr = [c.strip().strip('"\'').replace("\u00a0", " ").strip() for c in r]
+            while rr and rr[-1] == "":
+                rr.pop()  # 去掉尾部空列(CSV的\t尾巴)
+            if any(c for c in rr):
+                cleaned.append(rr)
+        rows = cleaned
         if not rows:
             return "break"
 
@@ -451,17 +484,19 @@ class App:
         start_row = self.inv_tree.index(sel[0]) if sel else 0
 
         # 判断起始列:
-        #  1) 手动指定(下拉框) > 自动
-        #  2) 两列纯数字(金额+数量场景): 有小数列→金额, 整数列→数量
-        #  3) 多列(≥3): 从名称列开始对齐
-        #  4) 单列纯数字: 全小数→金额; 全整数且≤4位→数量; 长数字(>4位, 如订单号)→备注
-        #  5) 单列文字/"是/否": 名称列
+        #  0) 点选的列 > 手动指定 > 自动识别
+        #  1) 两列纯数字(金额+数量场景): 有小数列→金额, 整数列→数量
+        #  2) 多列(≥3): 从名称列开始对齐
+        #  3) 单列纯数字: 全小数→金额; 全整数且≤4位→数量; 长数字(>4位, 如订单号)→备注
+        #  4) 单列文字/"是/否": 名称列
         ncols_data = max(len(r) for r in rows)
         key_cols = ("buyer", "tax_id", "is_natural", "qty", "amount", "remark")
         manual = {"名称": 0, "税号": 1, "自然人": 2, "数量": 3, "金额": 4, "备注": 5}.get(
             self.inv_paste_col.get().strip(), -1)
 
-        if manual >= 0:
+        if self._inv_click_col is not None:
+            start_key = self._inv_click_col  # 点选列优先: 只粘到点选的列
+        elif manual >= 0:
             start_key = manual  # 手动指定优先
         elif ncols_data == 2 and all(
                 all(_looks_like_number(c) for c in r if c.strip()) for r in rows):
@@ -492,8 +527,9 @@ class App:
                 for r in rows:
                     for c in r:
                         s = str(c).strip().replace(",", "").replace("，", "")
-                        if s and s.lstrip("-").isdigit():
-                            max_digits = max(max_digits, len(s.lstrip("-")))
+                        digits_only = re.sub(r"\D", "", s)  # 去掉所有非数字(含中间连字符)
+                        if digits_only:
+                            max_digits = max(max_digits, len(digits_only))
                 if max_digits > 4:
                     start_key = 5  # 备注(长数字如订单号)
                 else:
@@ -528,6 +564,8 @@ class App:
                     if j >= len(row):
                         continue
                     val = row[j].strip()
+                    if not val:
+                        continue  # 跳过空值, 不覆盖已有
                     if col_has_dec[j]:
                         self.invoices[idx]["amount"] = val
                     else:
