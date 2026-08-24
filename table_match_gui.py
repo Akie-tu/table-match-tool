@@ -198,7 +198,7 @@ def run_imgconvert(src_root, out_root, progress_cb=None):
 class App:
     def __init__(self, root):
         self.root = root
-        root.title("电商工具 v6.1")
+        root.title("电商工具 v6.1.1")
         root.geometry("780x700")
         root.minsize(700, 620)
 
@@ -453,7 +453,7 @@ class App:
         need = start_row + len(rows)
         while len(self.invoices) < need:
             self.invoices.append({"buyer": "", "tax_id": "", "is_natural": "",
-                                  "qty": "1", "amount": "", "remark": ""})
+                                  "qty": "", "amount": "", "remark": ""})
         self.invoice_refresh_tree()
 
         # 逐格写入
@@ -488,7 +488,7 @@ class App:
     def invoice_add_row(self):
         """新增一行(空发票), 自动进入编辑"""
         self.invoices.append({"buyer": "", "tax_id": "", "is_natural": "",
-                              "qty": "1", "amount": "", "remark": ""})
+                              "qty": "", "amount": "", "remark": ""})
         self.invoice_refresh_tree()
         children = self.inv_tree.get_children()
         if children:
