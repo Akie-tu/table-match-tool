@@ -198,7 +198,7 @@ def run_imgconvert(src_root, out_root, progress_cb=None):
 class App:
     def __init__(self, root):
         self.root = root
-        root.title("电商工具 v6.1.3")
+        root.title("电商工具 v6.1.4")
         root.geometry("780x700")
         root.minsize(700, 620)
 
@@ -450,7 +450,7 @@ class App:
         # 判断起始列:
         #  1) 手动指定(下拉框) > 自动
         #  2) 多列(≥2): 从名称列开始对齐
-        #  3) 单列纯数字: 全整数→数量列, 含小数→金额列
+        #  3) 单列纯数字: 全小数→金额; 全整数且≤4位→数量; 长数字(>4位, 如订单号)→备注
         #  4) 单列文字/"是/否": 名称列
         ncols_data = max(len(r) for r in rows)
         key_cols = ("buyer", "tax_id", "is_natural", "qty", "amount", "remark")
@@ -462,9 +462,22 @@ class App:
         elif manual >= 0:
             start_key = manual  # 手动指定
         elif all(_looks_like_number(c) for r in rows for c in r if c.strip()):
-            # 单列纯数字: 全部是整数→数量, 有小数→金额
+            # 单列纯数字
             has_decimal = any("." in c or "．" in c for r in rows for c in r if c.strip())
-            start_key = 3 if not has_decimal else 4  # qty / amount
+            if has_decimal:
+                start_key = 4  # 金额(含小数)
+            else:
+                # 全整数: 检查最大位数, >4位(订单号/长编码) → 备注
+                max_digits = 0
+                for r in rows:
+                    for c in r:
+                        s = str(c).strip().replace(",", "").replace("，", "")
+                        if s and s.lstrip("-").isdigit():
+                            max_digits = max(max_digits, len(s.lstrip("-")))
+                if max_digits > 4:
+                    start_key = 5  # 备注(长数字如订单号)
+                else:
+                    start_key = 3  # 数量(小整数)
         else:
             start_key = 0  # 单列文字→名称
 
