@@ -198,7 +198,7 @@ def run_imgconvert(src_root, out_root, progress_cb=None):
 class App:
     def __init__(self, root):
         self.root = root
-        root.title("电商工具 v6.1.1")
+        root.title("电商工具 v6.1.2")
         root.geometry("780x700")
         root.minsize(700, 620)
 
@@ -292,7 +292,7 @@ class App:
         tab = ttk.Frame(self.nb)
         self.nb.add(tab, text="③ 开票生成")
 
-        # 0. 固定内容配置 (一行)
+        # 0. 固定内容配置 (分两行, 避免超出窗口)
         frm0 = ttk.LabelFrame(tab, text="固定内容 (可修改, 通常不用动)")
         frm0.pack(fill="x", padx=10, pady=5)
         self.inv_type = tk.StringVar(value=DEFAULT_FIXED["invoice_type"])
@@ -301,24 +301,30 @@ class App:
         self.inv_code = tk.StringVar(value=DEFAULT_FIXED["tax_code"])
         self.inv_unit = tk.StringVar(value=DEFAULT_FIXED["unit"])
         self.inv_rate = tk.StringVar(value=DEFAULT_FIXED["tax_rate"])
-        ttk.Label(frm0, text="发票类型:").grid(row=0, column=0, sticky="w", padx=3, pady=2)
-        ttk.Combobox(frm0, textvariable=self.inv_type, values=INVOICE_TYPE_OPTIONS,
-                     width=10, state="readonly").grid(row=0, column=1, padx=3)
-        ttk.Label(frm0, text="含税:").grid(row=0, column=2, sticky="w", padx=3)
-        ttk.Combobox(frm0, textvariable=self.inv_taxinc, values=["是", "否"],
-                     width=3, state="readonly").grid(row=0, column=3, padx=3)
-        ttk.Label(frm0, text="项目:").grid(row=0, column=4, sticky="w", padx=3)
-        ttk.Entry(frm0, textvariable=self.inv_item, width=8).grid(row=0, column=5, padx=3)
-        ttk.Label(frm0, text="税收编码:").grid(row=0, column=6, sticky="w", padx=3)
-        ttk.Entry(frm0, textvariable=self.inv_code, width=20).grid(row=0, column=7, padx=3)
-        ttk.Label(frm0, text="单位:").grid(row=0, column=8, sticky="w", padx=3)
-        ttk.Entry(frm0, textvariable=self.inv_unit, width=3).grid(row=0, column=9, padx=3)
-        ttk.Label(frm0, text="税率:").grid(row=0, column=10, sticky="w", padx=3)
-        ttk.Entry(frm0, textvariable=self.inv_rate, width=4).grid(row=0, column=11, padx=3)
+        # 第一行: 固定内容
+        row0 = ttk.Frame(frm0)
+        row0.pack(fill="x", padx=4, pady=2)
+        ttk.Label(row0, text="发票类型:").pack(side="left", padx=(4, 2))
+        ttk.Combobox(row0, textvariable=self.inv_type, values=INVOICE_TYPE_OPTIONS,
+                     width=10, state="readonly").pack(side="left", padx=2)
+        ttk.Label(row0, text="含税:").pack(side="left", padx=8)
+        ttk.Combobox(row0, textvariable=self.inv_taxinc, values=["是", "否"],
+                     width=3, state="readonly").pack(side="left", padx=2)
+        ttk.Label(row0, text="项目:").pack(side="left", padx=8)
+        ttk.Entry(row0, textvariable=self.inv_item, width=8).pack(side="left", padx=2)
+        ttk.Label(row0, text="税收编码:").pack(side="left", padx=8)
+        ttk.Entry(row0, textvariable=self.inv_code, width=20).pack(side="left", padx=2)
+        ttk.Label(row0, text="单位:").pack(side="left", padx=8)
+        ttk.Entry(row0, textvariable=self.inv_unit, width=3).pack(side="left", padx=2)
+        ttk.Label(row0, text="税率:").pack(side="left", padx=8)
+        ttk.Entry(row0, textvariable=self.inv_rate, width=4).pack(side="left", padx=2)
+        # 第二行: 模板
+        row1 = ttk.Frame(frm0)
+        row1.pack(fill="x", padx=4, pady=2)
         self.inv_tpl = tk.StringVar(value="")
-        ttk.Label(frm0, text="模板:").grid(row=0, column=12, sticky="w", padx=3)
-        ttk.Entry(frm0, textvariable=self.inv_tpl, width=16).grid(row=0, column=13, padx=3)
-        ttk.Button(frm0, text="浏览", command=lambda: self.pick(self.inv_tpl)).grid(row=0, column=14, padx=3)
+        ttk.Label(row1, text="开票模板:").pack(side="left", padx=(4, 2))
+        ttk.Entry(row1, textvariable=self.inv_tpl, width=60).pack(side="left", padx=2, fill="x", expand=True)
+        ttk.Button(row1, text="浏览…", command=lambda: self.pick(self.inv_tpl)).pack(side="left", padx=4)
 
         # 1. 可编辑发票表格 (每行一个输入框 = 每行一张发票)
         frm2 = ttk.LabelFrame(tab, text="发票录入表 — 双击单元格填写, 或从Excel整块复制后直接 Ctrl+V 粘贴 (每行一张发票)")
