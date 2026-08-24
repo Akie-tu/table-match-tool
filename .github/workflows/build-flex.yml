@@ -28,10 +28,16 @@ jobs:
         run: |
           pyinstaller --onefile --windowed --name table-match-gui-flex --icon=app.ico --add-data "app.ico;." --add-data "invoice_template.xlsx;." table_match_gui.py
 
+      - name: Generate checksum
+        shell: bash
+        run: |
+          cd flex/dist && sha256sum table-match-gui-flex.exe > checksum-flex.txt && cat checksum-flex.txt
+
       - name: Upload asset to Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
           files: |
             flex/dist/table-match-gui-flex.exe
+            flex/dist/checksum-flex.txt
           fail_on_unmatched_files: false

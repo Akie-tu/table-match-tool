@@ -27,10 +27,10 @@ jobs:
         run: |
           pyinstaller --onefile --windowed --name table-match-gui --icon=app.ico --add-data "app.ico;." --add-data "invoice_template.xlsx;." table_match_gui.py
 
-      - name: Package CLI as zip
+      - name: Generate checksum
         shell: bash
         run: |
-          powershell -Command "Compress-Archive -Path table_match_tool.py -DestinationPath table-match-cli.zip -Force"
+          cd dist && sha256sum table-match-gui.exe > checksum.txt && cat checksum.txt
 
       - name: Get version tag
         id: ver
@@ -46,8 +46,7 @@ jobs:
           $MSG
 
           ### 下载
-          - **table-match-gui.exe** — GUI版（单文件双击运行）
-          - **table-match-cli.zip** — CLI/交互版（解压运行）
+          - **table-match-gui.exe** — GUI版（单文件双击运行，支持内置更新）
           
           " > body_file.txt
           echo "Done"
@@ -59,5 +58,5 @@ jobs:
           body_path: body_file.txt
           files: |
             dist/table-match-gui.exe
-            table-match-cli.zip
+            dist/checksum.txt
           fail_on_unmatched_files: false

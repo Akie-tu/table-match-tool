@@ -38,6 +38,12 @@ try:
 except ImportError:
     INVOICE_AVAILABLE = False
 
+try:
+    from update import check_update, download_file, self_exe_name, make_updater_bat, run_updater
+    UPDATE_AVAILABLE = True
+except ImportError:
+    UPDATE_AVAILABLE = False
+
 
 # ================= 表格核对核心 =================
 def _looks_like_number(s):
@@ -342,16 +348,32 @@ class App:
             self.inv_tree.column(c, width=widths[c], anchor="w")
         vsb = ttk.Scrollbar(frm2, orient="vertical", command=self.inv_tree.yview)
         self.inv_tree.configure(yscrollcommand=vsb.set)
-        # 网格线样式(横线+竖线分隔)
+        # 网格线样式(横线+竖线分隔 + 斑马纹)
         try:
             st = ttk.Style(self.root)
             st.configure("Inv.Treeview", rowheight=26,
-                         bordercolor="#777777", lightcolor="#777777", darkcolor="#777777")
+                         bordercolor="#555555", lightcolor="#555555", darkcolor="#555555",
+                         fieldbackground="white", background="white")
             st.configure("Inv.Treeview.Heading", bordercolor="#888888",
-                         lightcolor="#888888", darkcolor="#888888")
+                         lightcolor="#888888", darkcolor="#888888",
+                         font=("Microsoft YaHei", 9, "bold"))
+            st.map("Inv.Treeview",
+                   background=[("selected", "#d0e4f7")],
+                   foreground=[("selected", "#000000")])
             self.inv_tree.configure(style="Inv.Treeview")
+            # 斑马纹: 交替行背景增强横线分隔感
+            def _zebra():
+                try:
+                    for i, iid in enumerate(self.inv_tree.get_children()):
+                        tag = "odd" if i % 2 else "even"
+                        self.inv_tree.item(iid, tags=(tag,))
+                except Exception:
+                    pass
+            self.inv_tree.tag_configure("odd", background="#f7f7f7")
+            self.inv_tree.tag_configure("even", background="#ffffff")
+            self._inv_zebra = _zebra
         except Exception:
-            pass
+            self._inv_zebra = None
         self.inv_tree.pack(side="left", fill="both", expand=True, padx=(5, 0), pady=5)
         vsb.pack(side="right", fill="y", pady=5)
         self.invoices = []  # 数据模型: [{buyer,tax_id,is_natural,qty,amount,remark}]
@@ -371,12 +393,14 @@ class App:
         frm3.pack(fill="x", padx=10, pady=5)
         ttk.Button(frm3, text="＋ 新增一行", command=self.invoice_add_row).pack(side="left", padx=5)
         ttk.Button(frm3, text="删除选中行", command=self.invoice_del_sel).pack(side="left", padx=5)
+        ttk.Button(frm3, text="清空选中列", command=self.invoice_clear_col).pack(side="left", padx=5)
         ttk.Button(frm3, text="清空", command=self.invoice_clear).pack(side="left", padx=5)
         ttk.Label(frm3, text="单列粘贴→:").pack(side="left", padx=(12, 2))
         self.inv_paste_col = tk.StringVar(value="自动")
         paste_opts = ["自动", "名称", "税号", "自然人", "数量", "金额", "备注"]
         ttk.Combobox(frm3, textvariable=self.inv_paste_col, values=paste_opts,
                      width=5, state="readonly").pack(side="left", padx=2)
+        ttk.Button(frm3, text="检查更新", command=self.check_update_btn).pack(side="right", padx=5)
         ttk.Button(frm3, text="▶ 生成开票xlsx", command=self.invoice_generate).pack(side="right", padx=5)
 
         self.inv_log = scrolledtext.ScrolledText(tab, height=5, font=("Consolas", 9))
@@ -617,6 +641,9 @@ class App:
                 f"{i:03d}", inv.get("buyer", ""), inv.get("tax_id", ""),
                 inv.get("is_natural", "") or "", inv.get("qty", ""),
                 inv.get("amount", ""), inv.get("remark", "")))
+        # 斑马纹(网格横线感)
+        if getattr(self, "_inv_zebra", None):
+            self._inv_zebra()
 
     def invoice_add_row(self):
         """新增一行(空发票), 自动进入编辑"""
@@ -647,6 +674,41 @@ class App:
             if 0 <= idx < len(self.invoices):
                 del self.invoices[idx]
         self.invoice_refresh_tree()
+
+    def invoice_clear_col(self):
+        """清空选中的某一列所有行的数据(使用上次点选的列或下拉指定列)"""
+        # 优先: 点选的列; 其次: 下拉"单列粘贴"手动指定
+        COL_KEY_MAP = {"名称": "buyer", "税号": "tax_id", "自然人": "is_natural",
+                       "数量": "qty", "金额": "amount", "备注": "remark"}
+        col_key = None
+        col_label = None
+        if self._inv_click_col is not None:
+            # _inv_click_col: 0=名称 1=税号 2=自然人 3=数量 4=金额 5=备注 (与粘贴一致)
+            key_names = ("buyer", "tax_id", "is_natural", "qty", "amount", "remark")
+            labels = ("购买方名称", "纳税人识别号", "自然人", "数量", "金额", "备注")
+            if 0 <= self._inv_click_col < len(key_names):
+                col_key = key_names[self._inv_click_col]
+                col_label = labels[self._inv_click_col]
+        if col_key is None:
+            sel_label = self.inv_paste_col.get().strip()
+            col_key = COL_KEY_MAP.get(sel_label)
+            col_label = sel_label
+        if col_key is None or col_key == "serial":
+            messagebox.showinfo("提示", "请先点选要清空的列(单击该列任意一格), 或在\"单列粘贴→\"下拉选择")
+            return
+        if not self.invoices:
+            messagebox.showwarning("提示", "列表为空")
+            return
+        if not messagebox.askyesno("确认", f"确定清空「{col_label}」列全部 {len(self.invoices)} 行数据?"):
+            return
+        for inv in self.invoices:
+            inv[col_key] = ""
+        self.invoice_refresh_tree()
+        # 清空点选状态
+        self._inv_click_col = None
+        self._inv_click_row = None
+        self._inv_click_row_id = None
+        self.log(self.inv_log, f"🗑 已清空「{col_label}」列全部 {len(self.invoices)} 行")
 
     def invoice_clear(self):
         if self.invoices and messagebox.askyesno("确认", "清空全部发票?"):
@@ -726,6 +788,96 @@ class App:
         except Exception as e:
             self.log(self.inv_log, f"❌ 错误: {e}")
             messagebox.showerror("错误", str(e))
+
+    # ---------- 内置更新 ----------
+    def check_update_btn(self):
+        """手动检查更新按钮"""
+        if not UPDATE_AVAILABLE:
+            messagebox.showinfo("提示", "更新模块未加载")
+            return
+        self.log(self.inv_log, "🔍 检查更新中...")
+        try:
+            self.root.update_idletasks()
+            asset = self_exe_name()  # 当前运行的exe文件名, 下载同名资产
+            info = check_update(asset_name=asset)
+            if info is None:
+                self.log(self.inv_log, "⚠️ 检查失败(网络/API不可达)")
+                messagebox.showwarning("提示", "检查更新失败, 请检查网络")
+                return
+            if not info["has_update"]:
+                self.log(self.inv_log, f"✅ 已是最新版本 ({info['current_tag']})")
+                messagebox.showinfo("提示", f"已是最新版本 {info['current_tag']}")
+                return
+            body = (info["body"] or "").strip()
+            body_preview = "\n".join(body.splitlines()[:6]) if body else "(无更新日志)"
+            if not messagebox.askyesno("发现新版本",
+                                       f"发现新版本 {info['latest_tag']}\n"
+                                       f"当前版本 {info['current_tag']}\n\n"
+                                       f"更新内容:\n{body_preview}\n\n"
+                                       f"是否下载更新?"):
+                return
+            self.do_download_update(info)
+        except Exception as e:
+            self.log(self.inv_log, f"❌ 更新检查错误: {e}")
+            messagebox.showerror("错误", str(e))
+
+    def do_download_update(self, info):
+        """下载新exe → 启动updater替换"""
+        url = info.get("download_url")
+        if not url:
+            messagebox.showerror("错误", "未找到下载地址")
+            return
+        exe_name = self_exe_name()
+        temp_dir = os.path.dirname(os.path.abspath(sys.executable if getattr(sys, "frozen", False) else __file__))
+        new_exe = os.path.join(temp_dir, f"new_{exe_name}")
+        self.log(self.inv_log, f"⬇ 下载中: {info['latest_tag']} ...")
+        try:
+            self.root.update_idletasks()
+            ok, size, err = download_file(url, new_exe, timeout=180)
+            if not ok:
+                self.log(self.inv_log, f"❌ 下载失败: {err}")
+                messagebox.showerror("下载失败", f"请手动下载:\n{url}\n\n{err}")
+                return
+            self.log(self.inv_log, f"✅ 下载完成 ({size/1024/1024:.1f}MB), 准备更新...")
+            # 生成 updater.bat 并启动
+            old_exe = exe_name
+            bat = make_updater_bat(new_exe, old_exe, temp_dir)
+            bat_path = os.path.join(temp_dir, "updater.bat")
+            with open(bat_path, "w", encoding="ascii") as f:
+                f.write(bat)
+            self.log(self.inv_log, "🔄 3秒后自动替换并重启...")
+            messagebox.showinfo("更新", "下载完成, 程序将自动更新并重启")
+            self.root.after(3000, lambda: (run_updater(bat_path, new_exe, old_exe, temp_dir),
+                                           self.root.quit()))
+        except Exception as e:
+            self.log(self.inv_log, f"❌ 更新失败: {e}")
+            messagebox.showerror("错误", str(e))
+
+    def check_update_silent(self):
+        """启动时后台静默检查(不打扰), 有更新才提示"""
+        if not UPDATE_AVAILABLE:
+            return
+
+        def _do():
+            try:
+                asset = self_exe_name()
+                info = check_update(asset_name=asset)
+                if info and info["has_update"]:
+                    self.root.after(0, lambda: self._show_silent_update(info))
+            except Exception:
+                pass
+
+        import threading
+        t = threading.Thread(target=_do, daemon=True)
+        t.start()
+
+    def _show_silent_update(self, info):
+        body = (info["body"] or "").strip()
+        body_preview = "\n".join(body.splitlines()[:4]) if body else ""
+        if messagebox.askyesno("发现新版本(via 大萝北拔萝卜)",
+                               f"发现新版本 {info['latest_tag']} (当前 {info['current_tag']})\n\n"
+                               f"{body_preview}\n\n是否更新?"):
+            self.do_download_update(info)
 
     # ---------- 通用 ----------
     def pick(self, var):
@@ -833,7 +985,12 @@ def main():
         ttk.Style().theme_use("clam")
     except Exception:
         pass
-    App(root)
+    app = App(root)
+    # 启动后后台静默检查更新(有新版才提示)
+    try:
+        app.check_update_silent()
+    except Exception:
+        pass
     root.mainloop()
 
 
