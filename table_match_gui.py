@@ -40,9 +40,10 @@ except ImportError:
 
 # ================= 表格核对核心 =================
 def _looks_like_number(s):
-    """判断字符串是否为数字(金额/数量)"""
+    """判断字符串是否为数字(金额/数量/订单号) — 允许逗号/连字符/空格"""
     try:
-        float(str(s).replace(",", "").replace("，", ""))
+        s2 = str(s).replace(",", "").replace("，", "").replace("-", "").replace(" ", "")
+        float(s2)
         return True
     except (ValueError, TypeError):
         return False
@@ -198,7 +199,7 @@ def run_imgconvert(src_root, out_root, progress_cb=None):
 class App:
     def __init__(self, root):
         self.root = root
-        root.title("电商工具 v6.1.4")
+        root.title("电商工具 v6.1.5")
         root.geometry("780x700")
         root.minsize(700, 620)
 
@@ -438,7 +439,9 @@ class App:
         if not data:
             return "break"
         rows = [r.split("\t") for r in data.replace("\r\n", "\n").replace("\r", "\n").split("\n")]
-        rows = [r for r in rows if any(c.strip() for c in r)]
+        # 清洗: 去掉每个单元格首尾空白/\t/引号/多余符号
+        rows = [[c.strip().strip('"\'').replace("\u00a0", " ").strip() for c in r]
+                for r in rows if any(c.strip() for c in r)]
         if not rows:
             return "break"
 
@@ -449,18 +452,35 @@ class App:
 
         # 判断起始列:
         #  1) 手动指定(下拉框) > 自动
-        #  2) 多列(≥2): 从名称列开始对齐
-        #  3) 单列纯数字: 全小数→金额; 全整数且≤4位→数量; 长数字(>4位, 如订单号)→备注
-        #  4) 单列文字/"是/否": 名称列
+        #  2) 两列纯数字(金额+数量场景): 有小数列→金额, 整数列→数量
+        #  3) 多列(≥3): 从名称列开始对齐
+        #  4) 单列纯数字: 全小数→金额; 全整数且≤4位→数量; 长数字(>4位, 如订单号)→备注
+        #  5) 单列文字/"是/否": 名称列
         ncols_data = max(len(r) for r in rows)
         key_cols = ("buyer", "tax_id", "is_natural", "qty", "amount", "remark")
         manual = {"名称": 0, "税号": 1, "自然人": 2, "数量": 3, "金额": 4, "备注": 5}.get(
             self.inv_paste_col.get().strip(), -1)
 
-        if ncols_data >= 2:
+        if manual >= 0:
+            start_key = manual  # 手动指定优先
+        elif ncols_data == 2 and all(
+                all(_looks_like_number(c) for c in r if c.strip()) for r in rows):
+            # 两列纯数字: 检测每列含小数情况
+            col_has_decimal = [False, False]
+            for r in rows:
+                for j in (0, 1):
+                    if j < len(r) and r[j].strip():
+                        if "." in r[j] or "．" in r[j]:
+                            col_has_decimal[j] = True
+            # 有小数列视为金额, 另一列视为数量
+            if col_has_decimal[0] and not col_has_decimal[1]:
+                start_key = 4  # 第1列金额(下标4), 第2列数量(下标3)
+            elif col_has_decimal[1] and not col_has_decimal[0]:
+                start_key = 3  # 第1列数量(下标3), 第2列金额(下标4)
+            else:
+                start_key = 3  # 两列都整数或都小数 → 数量起(保守)
+        elif ncols_data >= 2:
             start_key = 0  # 多列从名称开始
-        elif manual >= 0:
-            start_key = manual  # 手动指定
         elif all(_looks_like_number(c) for r in rows for c in r if c.strip()):
             # 单列纯数字
             has_decimal = any("." in c or "．" in c for r in rows for c in r if c.strip())
@@ -489,20 +509,44 @@ class App:
         self.invoice_refresh_tree()
 
         # 逐格写入
-        for i, row in enumerate(rows):
-            for j, cell in enumerate(row):
-                k = start_key + j
-                if k >= len(key_cols):
-                    break
+        # 特殊: 两列纯数字(金额+数量) → 直接映射列(不靠偏移)
+        twocol_numeric = (ncols_data == 2 and start_key in (3, 4)
+                          and all(all(_looks_like_number(c) for c in r if c.strip()) for r in rows))
+        if twocol_numeric:
+            # 第1列/第2列 → 数量(3) 或 金额(4), 按含小数分配
+            col_has_dec = [False, False]
+            for r in rows:
+                for j in (0, 1):
+                    if j < len(r) and r[j].strip():
+                        if "." in r[j] or "．" in r[j]:
+                            col_has_dec[j] = True
+            for i, row in enumerate(rows):
                 idx = start_row + i
                 if idx >= len(self.invoices):
                     break
-                val = cell.strip()
-                key = key_cols[k]
-                if key == "is_natural":
-                    self.invoices[idx][key] = "是" if val == "是" else ""
-                else:
-                    self.invoices[idx][key] = val
+                for j in (0, 1):
+                    if j >= len(row):
+                        continue
+                    val = row[j].strip()
+                    if col_has_dec[j]:
+                        self.invoices[idx]["amount"] = val
+                    else:
+                        self.invoices[idx]["qty"] = val
+        else:
+            for i, row in enumerate(rows):
+                for j, cell in enumerate(row):
+                    k = start_key + j
+                    if k >= len(key_cols):
+                        break
+                    idx = start_row + i
+                    if idx >= len(self.invoices):
+                        break
+                    val = cell.strip()
+                    key = key_cols[k]
+                    if key == "is_natural":
+                        self.invoices[idx][key] = "是" if val == "是" else ""
+                    else:
+                        self.invoices[idx][key] = val
         self.invoice_refresh_tree()
         self.log(self.inv_log, f"✔ 已粘贴 {len(rows)} 行 × {ncols_data} 列")
         return "break"
