@@ -25,7 +25,7 @@ jobs:
 
       - name: Build GUI EXE (single-file)
         run: |
-          pyinstaller --onefile --windowed --name table-match-gui --icon=app.ico --add-data "app.ico;." table_match_gui.py
+          pyinstaller --onefile --windowed --name table-match-gui --icon=app.ico --add-data "app.ico;." --add-data "invoice_template.xlsx;." table_match_gui.py
 
       - name: Package CLI as zip
         shell: bash

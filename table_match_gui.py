@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
-电商工具 v5.0 - 通用表格核对 + 图片转换
-========================================
+电商工具 v6.0 - 表格核对 + 图片转换 + 开票生成
+============================================
 Tab1 表格核对: 用源表某字段去目标表检索, 回填字段 + 多规格标记
 Tab2 图片转换: 批量图片转JPG(webp/png/heic等→jpg), 保留目录树
+Tab3 开票生成: 数电发票批量开票模板生成(流水号自动+固定内容+手动/批量录入)
 
 功能:
   - 任意检索键列(快递单号/订单号等)
@@ -28,6 +29,13 @@ try:
     PIL_AVAILABLE = True
 except ImportError:
     PIL_AVAILABLE = False
+
+try:
+    from invoice_gen import (generate_invoice_xlsx, parse_bulk_text,
+                              DEFAULT_FIXED, INVOICE_TYPE_OPTIONS, find_template)
+    INVOICE_AVAILABLE = True
+except ImportError:
+    INVOICE_AVAILABLE = False
 
 
 # ================= 表格核对核心 =================
@@ -181,7 +189,7 @@ def run_imgconvert(src_root, out_root, progress_cb=None):
 class App:
     def __init__(self, root):
         self.root = root
-        root.title("电商工具 v5.0")
+        root.title("电商工具 v6.0")
         root.geometry("780x700")
         root.minsize(700, 620)
 
@@ -190,6 +198,7 @@ class App:
 
         self.build_match_tab()
         self.build_img_tab()
+        self.build_invoice_tab()
 
     # ---------- Tab1 表格核对 ----------
     def build_match_tab(self):
@@ -268,6 +277,208 @@ class App:
 
         self.img_log = scrolledtext.ScrolledText(tab, height=12, font=("Consolas", 9))
         self.img_log.pack(fill="both", expand=True, padx=10, pady=5)
+
+    # ---------- Tab3 开票生成 ----------
+    def build_invoice_tab(self):
+        tab = ttk.Frame(self.nb)
+        self.nb.add(tab, text="③ 开票生成")
+
+        # 0. 固定内容配置
+        frm0 = ttk.LabelFrame(tab, text="固定内容 (可修改, 通常不用动)")
+        frm0.pack(fill="x", padx=10, pady=5)
+        self.inv_type = tk.StringVar(value=DEFAULT_FIXED["invoice_type"])
+        self.inv_taxinc = tk.StringVar(value=DEFAULT_FIXED["tax_included"])
+        self.inv_item = tk.StringVar(value=DEFAULT_FIXED["item_name"])
+        self.inv_code = tk.StringVar(value=DEFAULT_FIXED["tax_code"])
+        self.inv_unit = tk.StringVar(value=DEFAULT_FIXED["unit"])
+        self.inv_rate = tk.StringVar(value=DEFAULT_FIXED["tax_rate"])
+        ttk.Label(frm0, text="发票类型:").grid(row=0, column=0, sticky="w", padx=5, pady=2)
+        ttk.Combobox(frm0, textvariable=self.inv_type, values=INVOICE_TYPE_OPTIONS,
+                     width=12, state="readonly").grid(row=0, column=1, padx=5)
+        ttk.Label(frm0, text="是否含税:").grid(row=0, column=2, sticky="w", padx=5)
+        ttk.Combobox(frm0, textvariable=self.inv_taxinc, values=["是", "否"],
+                     width=4, state="readonly").grid(row=0, column=3, padx=5)
+        ttk.Label(frm0, text="项目名称:").grid(row=0, column=4, sticky="w", padx=5)
+        ttk.Entry(frm0, textvariable=self.inv_item, width=10).grid(row=0, column=5, padx=5)
+        ttk.Label(frm0, text="税收编码:").grid(row=0, column=6, sticky="w", padx=5)
+        ttk.Entry(frm0, textvariable=self.inv_code, width=22).grid(row=0, column=7, padx=5)
+        ttk.Label(frm0, text="单位:").grid(row=1, column=0, sticky="w", padx=5, pady=2)
+        ttk.Entry(frm0, textvariable=self.inv_unit, width=6).grid(row=1, column=1, padx=5, sticky="w")
+        ttk.Label(frm0, text="税率:").grid(row=1, column=2, sticky="w", padx=5)
+        ttk.Entry(frm0, textvariable=self.inv_rate, width=6).grid(row=1, column=3, padx=5, sticky="w")
+        self.inv_tpl = tk.StringVar(value="")
+        ttk.Label(frm0, text="模板:").grid(row=1, column=4, sticky="w", padx=5)
+        ttk.Entry(frm0, textvariable=self.inv_tpl, width=26).grid(row=1, column=5, columnspan=2, padx=5)
+        ttk.Button(frm0, text="浏览", command=lambda: self.pick(self.inv_tpl)).grid(row=1, column=7, padx=5)
+
+        # 1. 手动录入
+        frm1 = ttk.LabelFrame(tab, text="手动添加一行 (自然人或海外无税号 → 勾选'自然人')")
+        frm1.pack(fill="x", padx=10, pady=5)
+        self.iv_buyer = tk.StringVar()
+        self.iv_taxid = tk.StringVar()
+        self.iv_natural = tk.BooleanVar(value=False)
+        self.iv_qty = tk.StringVar(value="1")
+        self.iv_amt = tk.StringVar()
+        self.iv_rmk = tk.StringVar()
+        ttk.Label(frm1, text="购买方名称*:").grid(row=0, column=0, sticky="w", padx=5, pady=2)
+        ttk.Entry(frm1, textvariable=self.iv_buyer, width=30).grid(row=0, column=1, padx=5)
+        ttk.Label(frm1, text="税号(公司必填):").grid(row=0, column=2, sticky="w", padx=5)
+        ttk.Entry(frm1, textvariable=self.iv_taxid, width=22).grid(row=0, column=3, padx=5)
+        ttk.Checkbutton(frm1, text="自然人", variable=self.iv_natural).grid(row=0, column=4, padx=5)
+        ttk.Label(frm1, text="数量:").grid(row=1, column=0, sticky="w", padx=5, pady=2)
+        ttk.Entry(frm1, textvariable=self.iv_qty, width=6).grid(row=1, column=1, padx=5, sticky="w")
+        ttk.Label(frm1, text="金额*:").grid(row=1, column=2, sticky="w", padx=5)
+        ttk.Entry(frm1, textvariable=self.iv_amt, width=12).grid(row=1, column=3, padx=5, sticky="w")
+        ttk.Label(frm1, text="备注:").grid(row=1, column=4, sticky="w", padx=5)
+        ttk.Entry(frm1, textvariable=self.iv_rmk, width=24).grid(row=1, column=5, padx=5)
+        ttk.Button(frm1, text="＋ 添加", command=self.invoice_add_one).grid(row=1, column=6, padx=8)
+        ttk.Button(frm1, text="批量导入…", command=self.invoice_bulk_dlg).grid(row=1, column=7, padx=5)
+
+        # 2. 发票列表
+        frm2 = ttk.LabelFrame(tab, text="发票列表 (流水号自动生成)")
+        frm2.pack(fill="both", expand=True, padx=10, pady=5)
+        cols = ("serial", "buyer", "taxid", "natural", "qty", "amount", "remark")
+        self.inv_tree = ttk.Treeview(frm2, columns=cols, show="headings", height=8)
+        headers = {"serial": "流水号", "buyer": "购买方名称", "taxid": "税号",
+                   "natural": "自然人", "qty": "数量", "amount": "金额", "remark": "备注"}
+        widths = {"serial": 55, "buyer": 200, "taxid": 170, "natural": 50,
+                  "qty": 50, "amount": 80, "remark": 120}
+        for c in cols:
+            self.inv_tree.heading(c, text=headers[c])
+            self.inv_tree.column(c, width=widths[c], anchor="w")
+        self.inv_tree.pack(fill="both", expand=True, padx=5, pady=5)
+        self.invoices = []  # 内存列表 [{buyer,tax_id,is_natural,qty,amount,remark}]
+
+        # 3. 操作按钮
+        frm3 = ttk.Frame(tab)
+        frm3.pack(fill="x", padx=10, pady=5)
+        ttk.Button(frm3, text="删除选中", command=self.invoice_del_sel).pack(side="left", padx=5)
+        ttk.Button(frm3, text="清空列表", command=self.invoice_clear).pack(side="left", padx=5)
+        ttk.Button(frm3, text="▶ 生成开票xlsx", command=self.invoice_generate).pack(side="right", padx=5)
+
+        self.inv_log = scrolledtext.ScrolledText(tab, height=6, font=("Consolas", 9))
+        self.inv_log.pack(fill="both", expand=True, padx=10, pady=5)
+
+        if not INVOICE_AVAILABLE:
+            self.log(self.inv_log, "⚠️ 开票模块未加载(invoice_gen.py缺失), 请联系管理员")
+
+    def invoice_refresh_tree(self):
+        self.inv_tree.delete(*self.inv_tree.get_children())
+        for i, inv in enumerate(self.invoices, 1):
+            sn = f"{i:03d}"
+            self.inv_tree.insert("", "end", values=(
+                sn, inv.get("buyer", ""), inv.get("tax_id", ""),
+                inv.get("is_natural", "") or "", inv.get("qty", ""),
+                inv.get("amount", ""), inv.get("remark", "")))
+
+    def invoice_add_one(self):
+        buyer = self.iv_buyer.get().strip()
+        amt = self.iv_amt.get().strip()
+        if not buyer:
+            messagebox.showwarning("提示", "请填写购买方名称")
+            return
+        if not amt:
+            messagebox.showwarning("提示", "请填写金额")
+            return
+        tax_id = self.iv_taxid.get().strip()
+        inv = {
+            "buyer": buyer, "tax_id": tax_id,
+            "is_natural": "是" if self.iv_natural.get() else "",
+            "qty": self.iv_qty.get().strip(), "amount": amt,
+            "remark": self.iv_rmk.get().strip(),
+        }
+        self.invoices.append(inv)
+        self.invoice_refresh_tree()
+        # 清空输入(保留数量和自然人勾选, 名称/税号/金额/备注清掉)
+        self.iv_buyer.set("")
+        self.iv_taxid.set("")
+        self.iv_amt.set("")
+        self.iv_rmk.set("")
+        self.log(self.inv_log, f"✔ 已添加: {buyer} 金额={amt}")
+
+    def invoice_bulk_dlg(self):
+        dlg = tk.Toplevel(self.root)
+        dlg.title("批量导入开票数据")
+        dlg.geometry("560x420")
+        dlg.transient(self.root)
+        dlg.grab_set()
+        ttk.Label(dlg, text="每行一条, 格式: 购买方名称, 税号或\"是\", 数量, 金额 (,备注可选)\n"
+                            "例: 张三,是,2,52.20    公司A,91370306MA3TBJ0T8E,1,122.00,加急\n"
+                            "海外/自然人无税号: 税号位写\"是\"或留空").pack(anchor="w", padx=10, pady=5)
+        txt = scrolledtext.ScrolledText(dlg, height=14, font=("Consolas", 10))
+        txt.pack(fill="both", expand=True, padx=10, pady=5)
+
+        def do_import():
+            try:
+                lst = parse_bulk_text(txt.get("1.0", "end"))
+            except ValueError as e:
+                messagebox.showerror("格式错误", str(e), parent=dlg)
+                return
+            if not lst:
+                messagebox.showwarning("提示", "没有解析到任何行", parent=dlg)
+                return
+            self.invoices.extend(lst)
+            self.invoice_refresh_tree()
+            self.log(self.inv_log, f"✔ 批量导入 {len(lst)} 条")
+            dlg.destroy()
+
+        frm = ttk.Frame(dlg)
+        frm.pack(fill="x", padx=10, pady=8)
+        ttk.Button(frm, text="导入", command=do_import).pack(side="right", padx=5)
+        ttk.Button(frm, text="取消", command=dlg.destroy).pack(side="right", padx=5)
+
+    def invoice_del_sel(self):
+        sel = self.inv_tree.selection()
+        if not sel:
+            return
+        idxs = sorted(int(self.inv_tree.item(i, "values")[0]) - 1 for i in sel)
+        for idx in reversed(idxs):
+            if 0 <= idx < len(self.invoices):
+                del self.invoices[idx]
+        self.invoice_refresh_tree()
+
+    def invoice_clear(self):
+        if self.invoices and messagebox.askyesno("确认", "清空全部发票?"):
+            self.invoices.clear()
+            self.invoice_refresh_tree()
+            self.log(self.inv_log, "🗑 列表已清空")
+
+    def invoice_generate(self):
+        if not self.invoices:
+            messagebox.showwarning("提示", "发票列表为空, 请先添加")
+            return
+        # 用当前固定内容覆盖默认
+        fixed = {
+            "invoice_type": self.inv_type.get(),
+            "tax_included": self.inv_taxinc.get(),
+            "item_name": self.inv_item.get().strip(),
+            "tax_code": self.inv_code.get().strip(),
+            "unit": self.inv_unit.get().strip(),
+            "tax_rate": self.inv_rate.get().strip(),
+        }
+        invoices = [{**inv, **fixed} for inv in self.invoices]
+        tpl = self.inv_tpl.get().strip().strip('"') or find_template()
+
+        out = filedialog.asksaveasfilename(
+            defaultextension=".xlsx", initialfile="开票导入.xlsx",
+            filetypes=[("Excel", "*.xlsx")])
+        if not out:
+            return
+        self.inv_log.insert("end", "▶ 生成中...\n")
+        try:
+            path, errs = generate_invoice_xlsx(invoices, template_path=tpl, out_path=out)
+            if errs:
+                self.log(self.inv_log, f"❌ 校验未通过 ({len(errs)} 条):")
+                for e in errs:
+                    self.log(self.inv_log, f"   {e}")
+                messagebox.showerror("校验失败", "请修正数据:\n" + "\n".join(errs[:10]))
+                return
+            self.log(self.inv_log, f"✅ 生成成功: {path}")
+            self.log(self.inv_log, f"   共 {len(invoices)} 张发票, 流水号 001~{len(invoices):03d}")
+            messagebox.showinfo("成功", f"开票文件已生成!\n{path}\n共 {len(invoices)} 张")
+        except Exception as e:
+            self.log(self.inv_log, f"❌ 错误: {e}")
+            messagebox.showerror("错误", str(e))
 
     # ---------- 通用 ----------
     def pick(self, var):
