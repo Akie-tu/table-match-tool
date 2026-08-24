@@ -1,0 +1,37 @@
+name: Build Flex EXE on Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-flex:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install deps
+        run: |
+          pip install pyinstaller openpyxl pillow
+
+      - name: Build Flex GUI EXE (single-file)
+        working-directory: flex
+        run: |
+          pyinstaller --onefile --windowed --name table-match-gui-flex --icon=app.ico --add-data "app.ico;." --add-data "invoice_template.xlsx;." table_match_gui.py
+
+      - name: Upload asset to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: |
+            flex/dist/table-match-gui-flex.exe
+          fail_on_unmatched_files: false
