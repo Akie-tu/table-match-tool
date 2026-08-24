@@ -356,7 +356,9 @@ class App:
         vsb.pack(side="right", fill="y", pady=5)
         self.invoices = []  # 数据模型: [{buyer,tax_id,is_natural,qty,amount,remark}]
         self._inv_editing = None  # 当前编辑状态 (entry, row_id, col_idx)
-        self._inv_click_col = None  # 粘贴目标列(点选记录) 0=名称 1=税号 2=自然人 3=数量 4=金额 5=备注
+        self._inv_click_col = None  # 粘贴起点列(点选记录) 0=名称 1=税号 2=自然人 3=数量 4=金额 5=备注
+        self._inv_click_row = None  # 粘贴起点行索引
+        self._inv_click_row_id = None  # 粘贴起点行Treeview id
 
         # 双击编辑 + Ctrl+V 粘贴 + 单击记录列 绑定
         self.inv_tree.bind("<Double-1>", self.inv_cell_double_click)
@@ -398,18 +400,26 @@ class App:
             self._inv_editing = None
 
     def inv_click_col(self, event):
-        """单击单元格 → 记录目标列(粘贴时只粘到该列)"""
+        """单击单元格 → 记录粘贴起点(行+列)。下次Ctrl+V从该格开始, 粘完自动恢复自动"""
         region = self.inv_tree.identify("region", event.x, event.y)
         if region != "cell":
             return
         col_id = self.inv_tree.identify_column(event.x)
+        row_id = self.inv_tree.identify_row(event.y)
         if not col_id:
             return
         col_idx = int(col_id.replace("#", "")) - 1
         if col_idx <= 0:  # 流水号列忽略
             return
         map_col = {"#2": 0, "#3": 1, "#4": 2, "#5": 3, "#6": 4, "#7": 5}
-        self._inv_click_col = map_col.get(col_id, None)
+        col_key = map_col.get(col_id, None)
+        if col_key is None:
+            return
+        # 记录 (行索引, 列key) 作为粘贴起点
+        row_idx = self.inv_tree.index(row_id) if row_id else 0
+        self._inv_click_col = col_key
+        self._inv_click_row = row_idx
+        self._inv_click_row_id = row_id
 
     def inv_cell_double_click(self, event):
         """双击单元格 → 就地编辑 (流水号列只读)"""
@@ -480,9 +490,12 @@ class App:
             return "break"
 
         self._inv_close_editor()
-        # 起始行: 有选中行则从选中行开始
-        sel = self.inv_tree.selection()
-        start_row = self.inv_tree.index(sel[0]) if sel else 0
+        # 起始行: 有点选的格子则从该格行开始, 否则选中行, 否则第0行
+        if getattr(self, "_inv_click_row", None) is not None:
+            start_row = self._inv_click_row
+        else:
+            sel = self.inv_tree.selection()
+            start_row = self.inv_tree.index(sel[0]) if sel else 0
 
         # 判断起始列:
         #  0) 点选的列 > 手动指定 > 自动识别
@@ -587,7 +600,13 @@ class App:
                     else:
                         self.invoices[idx][key] = val
         self.invoice_refresh_tree()
-        self.log(self.inv_log, f"✔ 已粘贴 {len(rows)} 行 × {ncols_data} 列")
+        # 粘贴完成: 清除点选状态(恢复到自动识别, 避免下次错乱)
+        had_click = self._inv_click_col is not None
+        self._inv_click_col = None
+        self._inv_click_row = None
+        self._inv_click_row_id = None
+        tip = ", 下一点选可指定位置" if had_click else ""
+        self.log(self.inv_log, f"✔ 已粘贴 {len(rows)} 行 × {ncols_data} 列{tip}")
         return "break"
 
     def invoice_refresh_tree(self):
@@ -633,7 +652,11 @@ class App:
         if self.invoices and messagebox.askyesno("确认", "清空全部发票?"):
             self.invoices.clear()
             self.invoice_refresh_tree()
-            self.log(self.inv_log, "🗑 列表已清空")
+            # 清空时重置点选粘贴状态, 避免下次粘贴残留到旧列
+            self._inv_click_col = None
+            self._inv_click_row = None
+            self._inv_click_row_id = None
+            self.log(self.inv_log, "🗑 列表已清空 (粘贴已恢复自动识别)")
 
     def invoice_bulk_dlg(self):
         dlg = tk.Toplevel(self.root)
