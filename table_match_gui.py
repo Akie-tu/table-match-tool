@@ -198,7 +198,7 @@ def run_imgconvert(src_root, out_root, progress_cb=None):
 class App:
     def __init__(self, root):
         self.root = root
-        root.title("电商工具 v6.1.2")
+        root.title("电商工具 v6.1.3")
         root.geometry("780x700")
         root.minsize(700, 620)
 
@@ -356,7 +356,11 @@ class App:
         ttk.Button(frm3, text="＋ 新增一行", command=self.invoice_add_row).pack(side="left", padx=5)
         ttk.Button(frm3, text="删除选中行", command=self.invoice_del_sel).pack(side="left", padx=5)
         ttk.Button(frm3, text="清空", command=self.invoice_clear).pack(side="left", padx=5)
-        ttk.Label(frm3, text="💡 Excel复制后Ctrl+V直接粘贴", foreground="#666").pack(side="left", padx=8)
+        ttk.Label(frm3, text="单列粘贴→:").pack(side="left", padx=(12, 2))
+        self.inv_paste_col = tk.StringVar(value="自动")
+        paste_opts = ["自动", "名称", "税号", "自然人", "数量", "金额", "备注"]
+        ttk.Combobox(frm3, textvariable=self.inv_paste_col, values=paste_opts,
+                     width=5, state="readonly").pack(side="left", padx=2)
         ttk.Button(frm3, text="▶ 生成开票xlsx", command=self.invoice_generate).pack(side="right", padx=5)
 
         self.inv_log = scrolledtext.ScrolledText(tab, height=5, font=("Consolas", 9))
@@ -443,17 +447,26 @@ class App:
         sel = self.inv_tree.selection()
         start_row = self.inv_tree.index(sel[0]) if sel else 0
 
-        # 智能判断起始列:
-        #  - 多列(≥2)数据: 从名称列(下标1)开始对齐
-        #  - 单列纯数字(如金额): 自动填金额列(下标5)
-        #  - 单列文字(名称等): 填名称列(下标1)
+        # 判断起始列:
+        #  1) 手动指定(下拉框) > 自动
+        #  2) 多列(≥2): 从名称列开始对齐
+        #  3) 单列纯数字: 全整数→数量列, 含小数→金额列
+        #  4) 单列文字/"是/否": 名称列
         ncols_data = max(len(r) for r in rows)
+        key_cols = ("buyer", "tax_id", "is_natural", "qty", "amount", "remark")
+        manual = {"名称": 0, "税号": 1, "自然人": 2, "数量": 3, "金额": 4, "备注": 5}.get(
+            self.inv_paste_col.get().strip(), -1)
+
         if ncols_data >= 2:
-            start_key = 0  # key_cols 下标, buyer
+            start_key = 0  # 多列从名称开始
+        elif manual >= 0:
+            start_key = manual  # 手动指定
         elif all(_looks_like_number(c) for r in rows for c in r if c.strip()):
-            start_key = 4  # amount
+            # 单列纯数字: 全部是整数→数量, 有小数→金额
+            has_decimal = any("." in c or "．" in c for r in rows for c in r if c.strip())
+            start_key = 3 if not has_decimal else 4  # qty / amount
         else:
-            start_key = 0  # buyer
+            start_key = 0  # 单列文字→名称
 
         # 需要粘贴的总行数(扩展)
         need = start_row + len(rows)
@@ -463,7 +476,6 @@ class App:
         self.invoice_refresh_tree()
 
         # 逐格写入
-        key_cols = ("buyer", "tax_id", "is_natural", "qty", "amount", "remark")
         for i, row in enumerate(rows):
             for j, cell in enumerate(row):
                 k = start_key + j
