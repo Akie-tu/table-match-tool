@@ -39,7 +39,7 @@ except ImportError:
     INVOICE_AVAILABLE = False
 
 try:
-    from update import check_update, download_file, self_exe_name, make_updater_bat, run_updater
+    from update import check_update, download_file, self_exe_name, make_updater_bat, run_updater, CURRENT_VERSION
     UPDATE_AVAILABLE = True
 except ImportError:
     UPDATE_AVAILABLE = False
@@ -240,7 +240,11 @@ def run_imgconvert(src_root, out_root, progress_cb=None):
 class App:
     def __init__(self, root):
         self.root = root
-        root.title("电商工具 v6.1.11")
+        # 版本号从 update.py 动态读取(发布只需改一处)
+        try:
+            root.title("电商工具 " + CURRENT_VERSION)
+        except Exception:
+            root.title("电商工具 v6.2.0")
         root.geometry("780x700")
         root.minsize(700, 620)
 
