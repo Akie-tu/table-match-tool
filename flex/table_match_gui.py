@@ -244,7 +244,7 @@ class App:
         try:
             root.title("电商工具 " + CURRENT_VERSION)
         except Exception:
-            root.title("电商工具 v6.3.1-Flex (灵活开票版) BY 大萝北拔萝卜")
+            root.title("电商工具 v6.3.2-Flex (灵活开票版) BY 大萝北拔萝卜")
         root.geometry("780x700")
         root.minsize(700, 620)
 
@@ -255,6 +255,21 @@ class App:
         self.build_img_tab()
         self.build_invoice_tab()
         self.build_email_tab()
+
+        # 公共底部状态栏(所有Tab可见): 版本号 + 检查更新
+        status = ttk.Frame(root)
+        status.pack(fill="x", padx=10, pady=(0, 4))
+        try:
+            _cur_ver = CURRENT_VERSION
+        except Exception:
+            _cur_ver = "?"
+        self.status_ver = tk.StringVar(value=f"v{_cur_ver}")
+        # 显示版本号(点击可检查更新)
+        ver_lbl = ttk.Label(status, textvariable=self.status_ver, foreground="#666")
+        ver_lbl.pack(side="left")
+        ver_lbl.bind("<Button-1>", lambda e: self.check_update_btn())
+        ttk.Button(status, text="🔍 检查更新 (v)", command=self.check_update_btn).pack(side="right")
+        # 版本号显示在左下, 检查更新按钮右下 (署名在各Tab内)
 
     # ---------- Tab1 表格核对 ----------
     def build_match_tab(self):
@@ -439,7 +454,6 @@ class App:
         paste_opts = ["自动", "名称", "税号", "自然人", "数量", "金额", "备注"]
         ttk.Combobox(frm3, textvariable=self.inv_paste_col, values=paste_opts,
                      width=5, state="readonly").pack(side="left", padx=2)
-        ttk.Button(frm3, text="检查更新", command=self.check_update_btn).pack(side="right", padx=5)
         ttk.Button(frm3, text="▶ 生成开票xlsx", command=self.invoice_generate).pack(side="right", padx=5)
 
         self.inv_log = scrolledtext.ScrolledText(tab, height=5, font=("Consolas", 9))
