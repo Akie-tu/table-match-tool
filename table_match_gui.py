@@ -52,6 +52,33 @@ except ImportError:
     EMAIL_AVAILABLE = False
 
 
+
+# ---------- 顶层弹窗 (所有messagebox置顶) ----------
+_MBOX_ROOT = None
+
+def _set_mbox_root(root):
+    global _MBOX_ROOT
+    _MBOX_ROOT = root
+
+def _mtop(kind, *args, **kwargs):
+    """带系统顶层的 messagebox 调用 (自动置顶, 避免被其他窗口遮挡)"""
+    import tkinter.messagebox as _mb
+    fn = getattr(_mb, kind)
+    if _MBOX_ROOT is not None:
+        try:
+            _MBOX_ROOT.attributes('-topmost', True)
+            _MBOX_ROOT.lift()
+            kwargs['parent'] = _MBOX_ROOT
+        except Exception:
+            pass
+    r = fn(*args, **kwargs)
+    if _MBOX_ROOT is not None:
+        try:
+            _MBOX_ROOT.attributes('-topmost', False)
+        except Exception:
+            pass
+    return r
+
 # ================= 表格核对核心 =================
 def _looks_like_number(s):
     """判断字符串是否为数字(金额/数量/订单号) — 允许逗号/连字符/空格"""
@@ -213,7 +240,7 @@ def run_imgconvert(src_root, out_root, progress_cb=None):
 class App:
     def __init__(self, root):
         self.root = root
-        root.title("电商工具 v6.1.9")
+        root.title("电商工具 v6.1.10")
         root.geometry("780x700")
         root.minsize(700, 620)
 
@@ -475,6 +502,7 @@ class App:
         dlg.geometry("480x330")
         dlg.transient(self.root)
         dlg.grab_set()
+        dlg.attributes("-topmost", True)  # 系统顶层
 
         cfg = load_config() or {}
         frame = ttk.Frame(dlg, padding=14)
@@ -519,14 +547,14 @@ class App:
             except ValueError:
                 port = 465
             if not sender or not auth or not server:
-                messagebox.showerror("错误", "SMTP服务器/发件邮箱/授权码 不能为空")
+                _mtop('showerror', "错误", "SMTP服务器/发件邮箱/授权码 不能为空")
                 return
             new_cfg = {"smtp_server": server, "smtp_port": port, "use_ssl": True,
                        "sender_email": sender, "auth_code": auth}
             path = save_config(new_cfg)
             self.email_cfg_state.set(f"发送邮箱: {sender}")
             self.log(self.email_log, f"✅ 邮箱配置已保存: {path}")
-            messagebox.showinfo("成功", "邮箱配置已保存(已加密)")
+            _mtop('showinfo', "成功", "邮箱配置已保存(已加密)")
             dlg.destroy()
 
         btns = ttk.Frame(dlg)
@@ -535,7 +563,7 @@ class App:
         ttk.Button(btns, text="取消", command=dlg.destroy).pack(side="left", padx=10)
 
     def email_reset_cfg(self):
-        if messagebox.askyesno("确认", "删除已保存的邮箱配置?"):
+        if _mtop('askyesno', "确认", "删除已保存的邮箱配置?"):
             reset_config()
             self.email_cfg_state.set("未配置 — 首次使用请先设置")
             self.log(self.email_log, "🗑 邮箱配置已删除")
@@ -548,7 +576,7 @@ class App:
     def email_send(self):
         cfg = load_config()
         if not cfg:
-            messagebox.showinfo("提示", "请先设置邮箱(SMTP配置)")
+            _mtop('showinfo', "提示", "请先设置邮箱(SMTP配置)")
             self.email_config_dlg()
             return
         to = self.email_to.get().strip()
@@ -556,17 +584,26 @@ class App:
         body = self.email_body.get("1.0", "end").strip()
         attach = self.email_attach.get().strip().strip('"')
         if not to:
-            messagebox.showwarning("提示", "收件人为空")
+            _mtop('showwarning', "提示", "收件人为空")
             return
-        self.log(self.email_log, f"📨 发送中 → {to} ...")
-        self.root.update_idletasks()
-        ok, msg = send_email(cfg, to, subj, body, attachment=attach or None)
+        # 后台线程发送, 避免阻塞UI(未响应)
+        self.log(self.email_log, f"📨 发送中 → {to} ... (请稍候)")
+        import threading
+
+        def _work():
+            ok, msg = send_email(cfg, to, subj, body, attachment=attach or None)
+            self.root.after(0, lambda: self._email_done(ok, msg, to))
+
+        t = threading.Thread(target=_work, daemon=True)
+        t.start()
+
+    def _email_done(self, ok, msg, to):
         if ok:
             self.log(self.email_log, f"✅ {msg} → {to}")
-            messagebox.showinfo("成功", "邮件已发送!")
+            _mtop('showinfo', "成功", "邮件已发送!")
         else:
             self.log(self.email_log, f"❌ 发送失败: {msg}")
-            messagebox.showerror("发送失败", str(msg))
+            _mtop('showerror', "发送失败", str(msg))
 
     # ---------- 可编辑表格支持 ----------
     INV_COLS = ("serial", "buyer", "taxid", "natural", "qty", "amount", "remark")
@@ -852,12 +889,12 @@ class App:
             col_key = COL_KEY_MAP.get(sel_label)
             col_label = sel_label
         if col_key is None or col_key == "serial":
-            messagebox.showinfo("提示", "请先点选要清空的列(单击该列任意一格), 或在\"单列粘贴→\"下拉选择")
+            _mtop('showinfo', "提示", "请先点选要清空的列(单击该列任意一格), 或在\"单列粘贴→\"下拉选择")
             return
         if not self.invoices:
-            messagebox.showwarning("提示", "列表为空")
+            _mtop('showwarning', "提示", "列表为空")
             return
-        if not messagebox.askyesno("确认", f"确定清空「{col_label}」列全部 {len(self.invoices)} 行数据?"):
+        if not _mtop('askyesno', "确认", f"确定清空「{col_label}」列全部 {len(self.invoices)} 行数据?"):
             return
         for inv in self.invoices:
             inv[col_key] = ""
@@ -869,7 +906,7 @@ class App:
         self.log(self.inv_log, f"🗑 已清空「{col_label}」列全部 {len(self.invoices)} 行")
 
     def invoice_clear(self):
-        if self.invoices and messagebox.askyesno("确认", "清空全部发票?"):
+        if self.invoices and _mtop('askyesno', "确认", "清空全部发票?"):
             self.invoices.clear()
             self.invoice_refresh_tree()
             # 清空时重置点选粘贴状态, 避免下次粘贴残留到旧列
@@ -884,6 +921,7 @@ class App:
         dlg.geometry("600x430")
         dlg.transient(self.root)
         dlg.grab_set()
+        dlg.attributes("-topmost", True)  # 系统顶层
         ttk.Label(dlg, text="每行一条发票, 格式: 购买方名称, 税号或\"是\", 数量, 金额 (,备注可选)\n"
                             "例: 张三,是,2,52.20    或  公司A,91370306MA3TBJ0T8E,1,122.00,加急\n"
                             "回车粘贴后点\"导入\"").pack(anchor="w", padx=10, pady=5)
@@ -894,10 +932,10 @@ class App:
             try:
                 lst = parse_bulk_text(txt.get("1.0", "end"))
             except ValueError as e:
-                messagebox.showerror("格式错误", str(e), parent=dlg)
+                _mtop('showerror', "格式错误", str(e), parent=dlg)
                 return
             if not lst:
-                messagebox.showwarning("提示", "没有解析到任何行", parent=dlg)
+                _mtop('showwarning', "提示", "没有解析到任何行", parent=dlg)
                 return
             self.invoices.extend(lst)
             self.invoice_refresh_tree()
@@ -911,7 +949,7 @@ class App:
 
     def invoice_generate(self):
         if not self.invoices:
-            messagebox.showwarning("提示", "发票列表为空, 请先添加")
+            _mtop('showwarning', "提示", "发票列表为空, 请先添加")
             return
         self._inv_close_editor()
         # 用当前固定内容覆盖默认
@@ -938,78 +976,95 @@ class App:
                 self.log(self.inv_log, f"❌ 校验未通过 ({len(errs)} 条):")
                 for e in errs:
                     self.log(self.inv_log, f"   {e}")
-                messagebox.showerror("校验失败", "请修正数据:\n" + "\n".join(errs[:10]))
+                _mtop('showerror', "校验失败", "请修正数据:\n" + "\n".join(errs[:10]))
                 return
             self.log(self.inv_log, f"✅ 生成成功: {path}")
             self.log(self.inv_log, f"   共 {len(invoices)} 张发票, 流水号 001~{len(invoices):03d}")
-            messagebox.showinfo("成功", f"开票文件已生成!\n{path}\n共 {len(invoices)} 张")
+            _mtop('showinfo', "成功", f"开票文件已生成!\n{path}\n共 {len(invoices)} 张")
         except Exception as e:
             self.log(self.inv_log, f"❌ 错误: {e}")
-            messagebox.showerror("错误", str(e))
+            _mtop('showerror', "错误", str(e))
 
     # ---------- 内置更新 ----------
     def check_update_btn(self):
-        """手动检查更新按钮"""
+        """手动检查更新按钮 (后台线程, 不阻塞UI)"""
         if not UPDATE_AVAILABLE:
-            messagebox.showinfo("提示", "更新模块未加载")
+            _mtop('showinfo', "提示", "更新模块未加载")
             return
-        self.log(self.inv_log, "🔍 检查更新中...")
-        try:
-            self.root.update_idletasks()
-            asset = self_exe_name()  # 当前运行的exe文件名, 下载同名资产
-            info = check_update(asset_name=asset)
-            if info is None:
-                self.log(self.inv_log, "⚠️ 检查失败(网络/API不可达)")
-                messagebox.showwarning("提示", "检查更新失败, 请检查网络")
-                return
-            if not info["has_update"]:
-                self.log(self.inv_log, f"✅ 已是最新版本 ({info['current_tag']})")
-                messagebox.showinfo("提示", f"已是最新版本 {info['current_tag']}")
-                return
-            body = (info["body"] or "").strip()
-            body_preview = "\n".join(body.splitlines()[:6]) if body else "(无更新日志)"
-            if not messagebox.askyesno("发现新版本",
-                                       f"发现新版本 {info['latest_tag']}\n"
-                                       f"当前版本 {info['current_tag']}\n\n"
-                                       f"更新内容:\n{body_preview}\n\n"
-                                       f"是否下载更新?"):
-                return
-            self.do_download_update(info)
-        except Exception as e:
-            self.log(self.inv_log, f"❌ 更新检查错误: {e}")
-            messagebox.showerror("错误", str(e))
+        self.log(self.inv_log, "🔍 检查更新中... (请稍候)")
+        import threading
+
+        def _work():
+            try:
+                asset = self_exe_name()
+                info = check_update(asset_name=asset)
+                self.root.after(0, lambda: self._check_update_done(info))
+            except Exception as e:
+                self.root.after(0, lambda: self._check_update_done(None, str(e)))
+
+        t = threading.Thread(target=_work, daemon=True)
+        t.start()
+
+    def _check_update_done(self, info, err=None):
+        if err:
+            self.log(self.inv_log, f"❌ 更新检查错误: {err}")
+            _mtop('showerror', "错误", str(err))
+            return
+        if info is None:
+            self.log(self.inv_log, "⚠️ 检查失败(网络/API不可达)")
+            _mtop('showwarning', "提示", "检查更新失败, 请检查网络")
+            return
+        if not info["has_update"]:
+            self.log(self.inv_log, f"✅ 已是最新版本 ({info['current_tag']})")
+            _mtop('showinfo', "提示", f"已是最新版本 {info['current_tag']}")
+            return
+        body = (info["body"] or "").strip()
+        body_preview = "\n".join(body.splitlines()[:6]) if body else "(无更新日志)"
+        if not _mtop('askyesno', "发现新版本",
+                                   f"发现新版本 {info['latest_tag']}\n"
+                                   f"当前版本 {info['current_tag']}\n\n"
+                                   f"更新内容:\n{body_preview}\n\n"
+                                   f"是否下载更新?"):
+            return
+        self.do_download_update(info)
 
     def do_download_update(self, info):
         """下载新exe → 启动updater替换"""
         url = info.get("download_url")
         if not url:
-            messagebox.showerror("错误", "未找到下载地址")
+            _mtop('showerror', "错误", "未找到下载地址")
             return
         exe_name = self_exe_name()
         temp_dir = os.path.dirname(os.path.abspath(sys.executable if getattr(sys, "frozen", False) else __file__))
         new_exe = os.path.join(temp_dir, f"new_{exe_name}")
-        self.log(self.inv_log, f"⬇ 下载中: {info['latest_tag']} ...")
-        try:
-            self.root.update_idletasks()
+        self.log(self.inv_log, f"⬇ 下载中: {info['latest_tag']} ... (请稍候)")
+        # 后台线程下载, 避免阻塞UI
+        import threading
+
+        def _work():
             ok, size, err = download_file(url, new_exe, timeout=180)
-            if not ok:
-                self.log(self.inv_log, f"❌ 下载失败: {err}")
-                messagebox.showerror("下载失败", f"请手动下载:\n{url}\n\n{err}")
-                return
-            self.log(self.inv_log, f"✅ 下载完成 ({size/1024/1024:.1f}MB), 准备更新...")
-            # 生成 updater.bat 并启动
-            old_exe = exe_name
-            bat = make_updater_bat(new_exe, old_exe, temp_dir)
-            bat_path = os.path.join(temp_dir, "updater.bat")
-            with open(bat_path, "w", encoding="ascii") as f:
-                f.write(bat)
-            self.log(self.inv_log, "🔄 3秒后自动替换并重启...")
-            messagebox.showinfo("更新", "下载完成, 程序将自动更新并重启")
-            self.root.after(3000, lambda: (run_updater(bat_path, new_exe, old_exe, temp_dir),
-                                           self.root.quit()))
-        except Exception as e:
-            self.log(self.inv_log, f"❌ 更新失败: {e}")
-            messagebox.showerror("错误", str(e))
+            self.root.after(0, lambda: self._download_done(info, ok, size, err, new_exe, exe_name, temp_dir))
+
+        t = threading.Thread(target=_work, daemon=True)
+        t.start()
+
+    def _download_done(self, info, ok, size, err, new_exe, exe_name, temp_dir):
+        if not ok:
+            url = info.get("download_url", "")
+            self.log(self.inv_log, f"❌ 下载失败: {err}")
+            _mtop('showerror', "下载失败", f"请手动下载:\n{url}\n\n{err}")
+            return
+        self.log(self.inv_log, f"✅ 下载完成 ({size/1024/1024:.1f}MB), 准备更新...")
+        # 生成 updater.bat 并启动
+        old_exe = exe_name
+        bat = make_updater_bat(new_exe, old_exe, temp_dir)
+        bat_path = os.path.join(temp_dir, "updater.bat")
+        with open(bat_path, "w", encoding="ascii") as f:
+            f.write(bat)
+        self.log(self.inv_log, "🔄 3秒后自动替换并重启...")
+        _mtop('showinfo', "更新", "下载完成, 程序将自动更新并重启")
+        self.root.after(3000, lambda: (run_updater(bat_path, new_exe, old_exe, temp_dir),
+                                       self.root.quit()))
 
     def check_update_silent(self):
         """启动时后台静默检查(不打扰), 有更新才提示"""
@@ -1032,7 +1087,7 @@ class App:
     def _show_silent_update(self, info):
         body = (info["body"] or "").strip()
         body_preview = "\n".join(body.splitlines()[:4]) if body else ""
-        if messagebox.askyesno("发现新版本(via 大萝北拔萝卜)",
+        if _mtop('askyesno', "发现新版本(via 大萝北拔萝卜)",
                                f"发现新版本 {info['latest_tag']} (当前 {info['current_tag']})\n\n"
                                f"{body_preview}\n\n是否更新?"):
             self.do_download_update(info)
@@ -1068,12 +1123,12 @@ class App:
         src = self.src_var.get().strip().strip('"')
         tgt = self.tgt_var.get().strip().strip('"')
         if not src or not tgt:
-            messagebox.showwarning("提示", "请先选择源表和目标表")
+            _mtop('showwarning', "提示", "请先选择源表和目标表")
             return
         fill_map = [(s.get().strip(), t.get().strip())
                     for s, t in self.map_rows if s.get().strip() and t.get().strip()]
         if not fill_map:
-            messagebox.showwarning("提示", "请至少填写一个回填映射")
+            _mtop('showwarning', "提示", "请至少填写一个回填映射")
             return
         self.run_btn.config(state="disabled")
         self.log(self.match_log, "▶ 开始核对...")
@@ -1090,17 +1145,17 @@ class App:
                     self.log(self.match_log, f"   {v}")
                 if len(notfound) > 50:
                     self.log(self.match_log, f"   ... 等 {len(notfound)} 个")
-            messagebox.showinfo("成功", f"核对完成!\n匹配 {matched}\n多规格 {multi}\n未匹配 {len(notfound)}")
+            _mtop('showinfo', "成功", f"核对完成!\n匹配 {matched}\n多规格 {multi}\n未匹配 {len(notfound)}")
         except Exception as e:
             self.log(self.match_log, f"❌ 错误: {e}")
-            messagebox.showerror("错误", str(e))
+            _mtop('showerror', "错误", str(e))
         finally:
             self.run_btn.config(state="normal")
 
     def run_img(self):
         src = self.img_src.get().strip().strip('"')
         if not src:
-            messagebox.showwarning("提示", "请选择源文件夹")
+            _mtop('showwarning', "提示", "请选择源文件夹")
             return
         q = max(1, min(100, self.img_q.get()))
         global QUALITY
@@ -1119,10 +1174,10 @@ class App:
                 self.log(self.img_log, "⚠️ 失败清单:")
                 for rel, e in errors[:10]:
                     self.log(self.img_log, f"   {rel}: {e}")
-            messagebox.showinfo("成功", f"转换完成!\n总{total}\n转JPG {converted}\n复制 {copied}\n失败 {failed}")
+            _mtop('showinfo', "成功", f"转换完成!\n总{total}\n转JPG {converted}\n复制 {copied}\n失败 {failed}")
         except Exception as e:
             self.log(self.img_log, f"❌ 错误: {e}")
-            messagebox.showerror("错误", str(e))
+            _mtop('showerror', "错误", str(e))
         finally:
             self.img_btn.config(state="normal")
 
@@ -1144,6 +1199,7 @@ def main():
     except Exception:
         pass
     app = App(root)
+    _set_mbox_root(root)
     # 启动后后台静默检查更新(有新版才提示)
     try:
         app.check_update_silent()
