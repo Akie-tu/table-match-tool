@@ -16,7 +16,7 @@ import urllib.request
 
 REPO = "Akie-tu/table-match-tool"
 # 当前版本 (打包时由构建注入, 或在此维护)
-CURRENT_VERSION = "v6.3.0"
+CURRENT_VERSION = "v6.3.1"
 
 
 def parse_version(tag):
@@ -201,27 +201,45 @@ def self_asset_name():
 def make_updater_bat(new_exe, old_exe, temp_dir):
     """
     生成 updater.bat (纯ASCII): 等待主进程退出→替换exe→重启
+    全部用绝对路径 + cd /d 到exe目录(修复Security validation/path失败)
     Windows CMD 的 GBK 编码, bat 必须纯 ASCII (windows-bat-encoding skill)
     """
+    # 绝对路径(带引号处理) — Windows盘符在Linux isabs不识别, 用splitdrive兼容
+    def _abs(p, base):
+        if os.path.isabs(p) or (len(p) > 2 and p[1] == ":"):
+            return p
+        return os.path.join(base, p).replace("/", "\\")
+
+    new_exe = _abs(new_exe, temp_dir)
+    old_exe = _abs(old_exe, temp_dir)
+    # tasklist IMAGENAME 只认文件名; 手动split兼容Linux测试(Windows分隔符\和/都处理)
+    old_name = old_exe.replace("/", "\\").split("\\")[-1]
+    new_q = f'"{new_exe}"'
+    old_q = f'"{old_exe}"'
+    dir_q = f'"{temp_dir}"'
     bat = f"""@echo off
 setlocal
 rem updater for table-match-gui (generated)
-rem wait for main process to exit
+cd /d {dir_q}
+rem wait for main process to exit (max 120s)
+set /a tries=0
 :loop
-tasklist /FI "IMAGENAME eq {old_exe}" 2>nul | find /I "{old_exe}" >nul
+tasklist /FI "IMAGENAME eq {old_name}" 2>nul | find /I "{old_name}" >nul
 if %errorlevel%==0 (
+  set /a tries+=1
+  if %tries% GEQ 120 goto force
   timeout /t 1 /nobreak >nul
   goto loop
 )
-rem replace
-copy /Y "{new_exe}" "{old_exe}" >nul 2>&1
+:force
+rem replace (move = 原子替换, 避免文件锁定)
+move /y {new_q} {old_q} >nul 2>&1
 if %errorlevel%==0 goto restart
-echo FAILED_TO_REPLACE > {temp_dir}\\updater_result.txt
+echo FAILED_TO_REPLACE > {dir_q}\\updater_result.txt
 exit /b 1
 :restart
-echo OK > {temp_dir}\\updater_result.txt
-del "{new_exe}" >nul 2>&1
-start "" "{old_exe}"
+echo OK > {dir_q}\\updater_result.txt
+start "" {old_q}
 exit /b 0
 """
     return bat

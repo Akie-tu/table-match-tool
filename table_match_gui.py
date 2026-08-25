@@ -244,7 +244,7 @@ class App:
         try:
             root.title("电商工具 " + CURRENT_VERSION)
         except Exception:
-            root.title("电商工具 v6.3.0")
+            root.title("电商工具 v6.3.1")
         root.geometry("780x700")
         root.minsize(700, 620)
 
