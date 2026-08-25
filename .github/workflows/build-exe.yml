@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - "v*"
+      - "!v*-flex"   # 主版: 排除flex版tag
 
 permissions:
   contents: write

@@ -3,7 +3,7 @@ name: Build Flex EXE on Release
 on:
   push:
     tags:
-      - "v*"
+      - "v*-flex"    # flex版: 只监听flex版tag
 
 permissions:
   contents: write
