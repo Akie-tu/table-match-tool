@@ -244,7 +244,7 @@ class App:
         try:
             root.title("电商工具 " + CURRENT_VERSION)
         except Exception:
-            root.title("电商工具 v6.3.6-Flex (灵活开票版) BY 大萝北拔萝卜")
+            root.title("电商工具 v6.3.7-Flex (灵活开票版) BY 大萝北拔萝卜")
         root.geometry("780x720")
         root.minsize(700, 640)
 
@@ -658,9 +658,10 @@ class App:
         if not col_id:
             return
         col_idx = int(col_id.replace("#", "")) - 1
-        if col_idx <= 0:  # 流水号列忽略
+        if col_idx == 0:  # 流水号列忽略
             return
-        map_col = {"#3": 0, "#4": 1, "#5": 2, "#6": 3, "#7": 4, "#8": 5, "#9": 6}
+        # 列映射: #2=发票类型(0) #3=含税(1) #4=名称(2) #5=税号(3) #6=自然人(4) #7=数量(5) #8=金额(6) #9=备注(7)
+        map_col = {"#2": 0, "#3": 1, "#4": 2, "#5": 3, "#6": 4, "#7": 5, "#8": 6, "#9": 7}
         col_key = map_col.get(col_id, None)
         if col_key is None:
             return
@@ -1177,10 +1178,27 @@ class App:
         bat_path = os.path.join(temp_dir, "updater.bat")
         with open(bat_path, "w", encoding="ascii") as f:
             f.write(bat)
-        self.log(self.inv_log, "🔄 3秒后自动替换并重启...")
-        _mtop('showinfo', "更新", "下载完成, 程序将自动更新并重启")
-        self.root.after(3000, lambda: (run_updater(bat_path, new_exe, exe_name, temp_dir),
-                                       self.root.quit()))
+        self.log(self.inv_log, "🔄 准备更新...")
+        _mtop('showinfo', "更新", "下载完成, 点确定后程序将自动更新并重启(约5秒)")
+
+        def _do_update():
+            # 确保GUI销毁+进程强制退出, updater才能接管替换
+            try:
+                run_updater(bat_path, new_exe, exe_name, temp_dir)
+            except Exception:
+                pass
+            try:
+                self.root.destroy()
+            except Exception:
+                pass
+            try:
+                import sys
+                sys.stdout.flush()
+            except Exception:
+                pass
+            os._exit(0)  # 强制退出, 不留存活进程
+
+        self.root.after(1000, _do_update)
 
     def check_update_silent(self):
         """启动时后台静默检查(不打扰): 有更新只标记按钮, 不弹窗(防双弹窗)"""
