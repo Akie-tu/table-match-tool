@@ -44,6 +44,13 @@ try:
 except ImportError:
     UPDATE_AVAILABLE = False
 
+try:
+    from email_sender import (load_config, save_config, reset_config, send_email,
+                              config_path, PRESETS)
+    EMAIL_AVAILABLE = True
+except ImportError:
+    EMAIL_AVAILABLE = False
+
 
 # ================= 表格核对核心 =================
 def _looks_like_number(s):
@@ -206,7 +213,7 @@ def run_imgconvert(src_root, out_root, progress_cb=None):
 class App:
     def __init__(self, root):
         self.root = root
-        root.title("电商工具 v6.1.8")
+        root.title("电商工具 v6.1.9")
         root.geometry("780x700")
         root.minsize(700, 620)
 
@@ -216,6 +223,7 @@ class App:
         self.build_match_tab()
         self.build_img_tab()
         self.build_invoice_tab()
+        self.build_email_tab()
 
     # ---------- Tab1 表格核对 ----------
     def build_match_tab(self):
@@ -408,6 +416,157 @@ class App:
 
         if not INVOICE_AVAILABLE:
             self.log(self.inv_log, "⚠️ 开票模块未加载(invoice_gen.py缺失), 请联系管理员")
+
+    # ---------- Tab4 邮箱发送 ----------
+    def build_email_tab(self):
+        tab = ttk.Frame(self.nb)
+        self.nb.add(tab, text="④ 邮箱发送")
+
+        if not EMAIL_AVAILABLE:
+            ttk.Label(tab, text="⚠️ 邮件模块未加载(email_sender.py缺失)").pack(pady=20)
+            return
+
+        # 状态栏: 配置状态
+        frm0 = ttk.Frame(tab)
+        frm0.pack(fill="x", padx=10, pady=5)
+        cfg = load_config()
+        self.email_cfg_state = tk.StringVar(
+            value=f"发送邮箱: {cfg['sender_email']}" if cfg else "未配置 — 首次使用请先设置")
+        ttk.Label(frm0, textvariable=self.email_cfg_state, foreground="#c55"
+                  if not cfg else "#383").pack(side="left")
+        ttk.Button(frm0, text="⚙ 设置邮箱", command=self.email_config_dlg).pack(side="left", padx=10)
+        ttk.Button(frm0, text="重置配置", command=self.email_reset_cfg).pack(side="left")
+
+        # 邮件内容区
+        frm1 = ttk.LabelFrame(tab, text="邮件内容")
+        frm1.pack(fill="both", expand=True, padx=10, pady=5)
+        row = 0
+        ttk.Label(frm1, text="收件人:").grid(row=row, column=0, sticky="e", padx=6, pady=6)
+        self.email_to = tk.StringVar()
+        ttk.Entry(frm1, textvariable=self.email_to, width=60).grid(row=row, column=1, sticky="we", padx=6)
+        row += 1
+        ttk.Label(frm1, text="主题:").grid(row=row, column=0, sticky="e", padx=6, pady=6)
+        self.email_subj = tk.StringVar()
+        ttk.Entry(frm1, textvariable=self.email_subj, width=60).grid(row=row, column=1, sticky="we", padx=6)
+        row += 1
+        ttk.Label(frm1, text="正文:").grid(row=row, column=0, sticky="ne", padx=6, pady=6)
+        self.email_body = scrolledtext.ScrolledText(frm1, height=6, font=("Microsoft YaHei", 9))
+        self.email_body.grid(row=row, column=1, sticky="nsew", padx=6, pady=6)
+        row += 1
+        ttk.Label(frm1, text="附件:").grid(row=row, column=0, sticky="e", padx=6, pady=6)
+        self.email_attach = tk.StringVar()
+        ttk.Entry(frm1, textvariable=self.email_attach, width=60).grid(row=row, column=1, sticky="we", padx=6)
+        ttk.Button(frm1, text="选择文件…", command=self.email_pick_attach).grid(row=row, column=2, padx=6)
+        frm1.columnconfigure(1, weight=1)
+
+        # 发送/日志
+        frm2 = ttk.Frame(tab)
+        frm2.pack(fill="x", padx=10, pady=5)
+        ttk.Button(frm2, text="📨 发送邮件", command=self.email_send).pack(side="left", padx=5)
+        self.email_log = scrolledtext.ScrolledText(tab, height=6, font=("Consolas", 9))
+        self.email_log.pack(fill="both", expand=True, padx=10, pady=5)
+        ttk.Label(tab, text="BY 大萝北拔萝卜", foreground="#888").pack(anchor="e", padx=12, pady=(0, 4))
+        self.log(self.email_log, "提示: 填好收件人/主题/正文/附件, 点『发送邮件』")
+
+    def email_config_dlg(self):
+        """设置邮箱弹窗 (SMTP 配置), 敏感字段加密保存"""
+        dlg = tk.Toplevel(self.root)
+        dlg.title("设置发送邮箱 (SMTP)")
+        dlg.geometry("480x330")
+        dlg.transient(self.root)
+        dlg.grab_set()
+
+        cfg = load_config() or {}
+        frame = ttk.Frame(dlg, padding=14)
+        frame.pack(fill="both", expand=True)
+
+        ttk.Label(frame, text="预设:").grid(row=0, column=0, sticky="e", padx=6, pady=6)
+        presets = tk.StringVar()
+        combo = ttk.Combobox(frame, textvariable=presets, values=list(PRESETS.keys()),
+                             width=20, state="readonly")
+        combo.grid(row=0, column=1, sticky="w", padx=6)
+        def _apply_preset(*_):
+            p = PRESETS.get(presets.get())
+            if p:
+                sv_server.set(p["smtp_server"])
+                sv_port.set(str(p["smtp_port"]))
+        combo.bind("<<ComboboxSelected>>", _apply_preset)
+
+        ttk.Label(frame, text="SMTP服务器:").grid(row=1, column=0, sticky="e", padx=6, pady=6)
+        sv_server = tk.StringVar(value=cfg.get("smtp_server", "smtp.qq.com"))
+        ttk.Entry(frame, textvariable=sv_server, width=35).grid(row=1, column=1, sticky="w", padx=6)
+        ttk.Label(frame, text="端口:").grid(row=1, column=2, sticky="e", padx=4)
+        sv_port = tk.StringVar(value=str(cfg.get("smtp_port", 465)))
+        ttk.Entry(frame, textvariable=sv_port, width=8).grid(row=1, column=3, sticky="w", padx=6)
+
+        ttk.Label(frame, text="发件邮箱:").grid(row=2, column=0, sticky="e", padx=6, pady=6)
+        sv_sender = tk.StringVar(value=cfg.get("sender_email", ""))
+        ttk.Entry(frame, textvariable=sv_sender, width=35).grid(row=2, column=1, columnspan=3, sticky="w", padx=6)
+
+        ttk.Label(frame, text="授权码/密码:").grid(row=3, column=0, sticky="e", padx=6, pady=6)
+        sv_auth = tk.StringVar(value=cfg.get("auth_code", ""))
+        ttk.Entry(frame, textvariable=sv_auth, width=35, show="*").grid(row=3, column=1, columnspan=3, sticky="w", padx=6)
+
+        ttk.Label(frame, text="提示: QQ/163邮箱需用『授权码』而非登录密码\n发件人将显示为邮箱地址(纯地址)", foreground="#888").grid(
+            row=4, column=0, columnspan=4, sticky="w", padx=6, pady=4)
+
+        def _ok():
+            sender = sv_sender.get().strip()
+            auth = sv_auth.get().strip()
+            server = sv_server.get().strip()
+            try:
+                port = int(sv_port.get().strip() or 465)
+            except ValueError:
+                port = 465
+            if not sender or not auth or not server:
+                messagebox.showerror("错误", "SMTP服务器/发件邮箱/授权码 不能为空")
+                return
+            new_cfg = {"smtp_server": server, "smtp_port": port, "use_ssl": True,
+                       "sender_email": sender, "auth_code": auth}
+            path = save_config(new_cfg)
+            self.email_cfg_state.set(f"发送邮箱: {sender}")
+            self.log(self.email_log, f"✅ 邮箱配置已保存: {path}")
+            messagebox.showinfo("成功", "邮箱配置已保存(已加密)")
+            dlg.destroy()
+
+        btns = ttk.Frame(dlg)
+        btns.pack(pady=8)
+        ttk.Button(btns, text="保存", command=_ok).pack(side="left", padx=10)
+        ttk.Button(btns, text="取消", command=dlg.destroy).pack(side="left", padx=10)
+
+    def email_reset_cfg(self):
+        if messagebox.askyesno("确认", "删除已保存的邮箱配置?"):
+            reset_config()
+            self.email_cfg_state.set("未配置 — 首次使用请先设置")
+            self.log(self.email_log, "🗑 邮箱配置已删除")
+
+    def email_pick_attach(self):
+        p = filedialog.askopenfilename(filetypes=[("所有文件", "*.*")])
+        if p:
+            self.email_attach.set(p)
+
+    def email_send(self):
+        cfg = load_config()
+        if not cfg:
+            messagebox.showinfo("提示", "请先设置邮箱(SMTP配置)")
+            self.email_config_dlg()
+            return
+        to = self.email_to.get().strip()
+        subj = self.email_subj.get().strip()
+        body = self.email_body.get("1.0", "end").strip()
+        attach = self.email_attach.get().strip().strip('"')
+        if not to:
+            messagebox.showwarning("提示", "收件人为空")
+            return
+        self.log(self.email_log, f"📨 发送中 → {to} ...")
+        self.root.update_idletasks()
+        ok, msg = send_email(cfg, to, subj, body, attachment=attach or None)
+        if ok:
+            self.log(self.email_log, f"✅ {msg} → {to}")
+            messagebox.showinfo("成功", "邮件已发送!")
+        else:
+            self.log(self.email_log, f"❌ 发送失败: {msg}")
+            messagebox.showerror("发送失败", str(msg))
 
     # ---------- 可编辑表格支持 ----------
     INV_COLS = ("serial", "buyer", "taxid", "natural", "qty", "amount", "remark")
