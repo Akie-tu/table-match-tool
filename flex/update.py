@@ -16,7 +16,7 @@ import urllib.request
 
 REPO = "Akie-tu/table-match-tool"
 # 当前版本 (打包时由构建注入, 或在此维护)
-CURRENT_VERSION = "v6.3.2"
+CURRENT_VERSION = "v6.3.4"
 
 
 def parse_version(tag):
@@ -36,32 +36,43 @@ def version_gt(a, b):
     return pa > pb
 
 
-def get_latest_release(timeout=15):
-    """查询最新Release, 返回 (tag, body, assets) 或 None(失败/无更新)
-    双通道: 先API, 失败fallback网页版(国内api.github.com常被墙但网页可达)"""
-    # 通道1: API
+def get_latest_release(asset_name=None, timeout=15):
+    """
+    查询含指定资产的最新Release, 返回 (tag, body, assets) 或 None
+    按资产归口: 主版找含 table-match-gui.exe 的最新release, flex 找 flex 资产
+    双通道: 先API(翻列表找资产), 失败fallback网页版
+    """
+    # 通道1: API — releases?per_page=15 翻找含目标资产的最新release
     try:
-        url = f"https://api.github.com/repos/{REPO}/releases/latest"
+        url = f"https://api.github.com/repos/{REPO}/releases?per_page=15"
         req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
         with urllib.request.urlopen(req, timeout=timeout) as r:
-            d = json.loads(r.read().decode())
-        assets = {a["name"]: a["browser_download_url"] for a in d.get("assets", [])}
-        return d.get("tag_name"), d.get("body") or "", assets
+            releases = json.loads(r.read().decode())
+        for rel in releases:
+            assets = {a["name"]: a["browser_download_url"] for a in rel.get("assets", [])}
+            # 无资产名要求 → 返回最新; 有资产名 → 找含该资产的
+            if asset_name is None:
+                return rel.get("tag_name"), rel.get("body") or "", assets
+            if asset_name in assets:
+                return rel.get("tag_name"), rel.get("body") or "", assets
+        return None  # 15个release里都没有目标资产
     except Exception:
         pass
-    # 通道2: 网页版 (releases/latest 302重定向 → /releases/tag/vX.Y.Z)
+    # 通道2: 网页版 — releases?per_page=5 列表页解析tag+资产链接
     try:
-        url = f"https://github.com/{REPO}/releases/latest"
-        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"}, method="HEAD")
+        url = f"https://github.com/{REPO}/releases?per_page=5"
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
         with urllib.request.urlopen(req, timeout=timeout) as r:
-            final = r.geturl()
-        m = re.search(r"/releases/tag/([^/?#]+)", final)
-        if not m:
-            return None
-        tag = m.group(1)
-        # 资产直链: releases/download/{tag}/{asset}
-        # asset名即exe文件名, 由check_update传入
-        return tag, "", {}
+            html = r.read().decode("utf-8", errors="ignore")
+        # 解析每个release的tag和资产 (页面结构: /releases/tag/xxx 和 href资产链接)
+        if asset_name is None:
+            m = re.search(r"/releases/tag/([^/?#\"]+)", html)
+            return (m.group(1), "", {}) if m else None
+        # 找含目标资产的release: 按出现顺序, 资产链接 /releases/download/{tag}/{asset}
+        m = re.search(rf"/releases/download/([^/?#\"]+)/{re.escape(asset_name)}", html)
+        if m:
+            return m.group(1), "", {m.group(1): f"https://github.com/{REPO}/releases/download/{m.group(1)}/{asset_name}"}
+        return None
     except Exception:
         return None
 
@@ -70,16 +81,24 @@ def check_update(current=None, asset_name=None, timeout=15):
     """
     检查更新. 返回 dict 或 None:
       {latest_tag, current_tag, has_update, body, download_url, asset_name}
+    按资产名归口: 主版(asset=table-match-gui.exe)忽略-flex tag, flex忽略无-flex tag
     """
     cur = current or CURRENT_VERSION
+    is_flex = bool(asset_name and "flex" in asset_name)
     try:
-        result = get_latest_release(timeout=timeout)
+        result = get_latest_release(asset_name=asset_name, timeout=timeout)
         if result is None:
             return None
         tag, body, assets = result
     except Exception:
         return None  # 网络/API失败
     if not tag:
+        return None
+    tag_l = tag.lower()
+    # 归口双保险(asset匹配已保证, 这里再校验tag后缀一致性)
+    if is_flex and not tag_l.endswith("-flex"):
+        return None
+    if not is_flex and tag_l.endswith("-flex"):
         return None
     has = version_gt(tag, cur)
     url = assets.get(asset_name) if asset_name else (list(assets.values())[0] if assets else None)
