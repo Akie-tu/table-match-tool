@@ -16,7 +16,7 @@ import urllib.request
 
 REPO = "Akie-tu/table-match-tool"
 # 当前版本 (打包时由构建注入, 或在此维护)
-CURRENT_VERSION = "v6.2.2"
+CURRENT_VERSION = "v6.2.3"
 
 
 def parse_version(tag):
@@ -145,8 +145,21 @@ def _mirror_urls(url, asset_name):
     return mirrors
 
 
+def _asset_ready(url, timeout=20):
+    """HEAD预检资产是否已上传(CI构建中会404)"""
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"}, method="HEAD")
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.status == 200
+    except Exception:
+        return False
+
+
 def download_file(url, dest, progress_cb=None, timeout=120):
     """多通道下载(直连+镜像自动切换, 带断点续传+大小校验), 返回 (ok, size, err)"""
+    # 预检: 资产未上传(404) → 直接返回友好错误
+    if not _asset_ready(url):
+        return False, 0, "新版本正在构建中, 请稍候几分钟再试(资产尚未上传)"
     # 预检: 已存在且非0字节 → 尝试续传优先
     for idx, u in enumerate(_mirror_urls(url, "")):
         if os.path.exists(dest) and os.path.getsize(dest) > 0 and idx != 0:
