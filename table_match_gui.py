@@ -39,7 +39,7 @@ except ImportError:
     INVOICE_AVAILABLE = False
 
 try:
-    from update import check_update, download_file, self_exe_name, make_updater_bat, run_updater, CURRENT_VERSION
+    from update import check_update, download_file, self_exe_name, self_asset_name, make_updater_bat, run_updater, CURRENT_VERSION
     UPDATE_AVAILABLE = True
 except ImportError:
     UPDATE_AVAILABLE = False
@@ -244,7 +244,7 @@ class App:
         try:
             root.title("电商工具 " + CURRENT_VERSION)
         except Exception:
-            root.title("电商工具 v6.2.3")
+            root.title("电商工具 v6.3.0")
         root.geometry("780x700")
         root.minsize(700, 620)
 
@@ -1000,7 +1000,7 @@ class App:
 
         def _work():
             try:
-                asset = self_exe_name()
+                asset = self_asset_name()
                 info = check_update(asset_name=asset)
                 self.root.after(0, lambda: self._check_update_done(info))
             except Exception as e:
@@ -1077,7 +1077,7 @@ class App:
 
         def _do():
             try:
-                asset = self_exe_name()
+                asset = self_asset_name()
                 info = check_update(asset_name=asset)
                 if info and info["has_update"]:
                     self.root.after(0, lambda: self._show_silent_update(info))

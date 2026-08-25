@@ -16,7 +16,7 @@ import urllib.request
 
 REPO = "Akie-tu/table-match-tool"
 # 当前版本 (打包时由构建注入, 或在此维护)
-CURRENT_VERSION = "v6.2.3"
+CURRENT_VERSION = "v6.3.0"
 
 
 def parse_version(tag):
@@ -181,6 +181,20 @@ def self_exe_name():
     """当前运行的exe文件名 (打包时= sys.executable 文件名)"""
     if getattr(sys, "frozen", False):
         return os.path.basename(sys.executable)
+    return "table-match-gui.exe"
+
+
+def self_asset_name():
+    """
+    GitHub Release 资产标准名 (不依赖当前exe文件名!)
+    用户可能把 exe 改名(如 new_table-match-gui.exe)导致按文件名找资产404
+    按是否 flex 版判定:
+      - 主版: table-match-gui.exe
+      - flex版: table-match-gui-flex.exe
+    """
+    exe = self_exe_name().lower()
+    if "flex" in exe:
+        return "table-match-gui-flex.exe"
     return "table-match-gui.exe"
 
 

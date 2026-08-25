@@ -39,7 +39,7 @@ except ImportError:
     INVOICE_AVAILABLE = False
 
 try:
-    from update import check_update, download_file, self_exe_name, make_updater_bat, run_updater
+    from update import check_update, download_file, self_exe_name, self_asset_name, make_updater_bat, run_updater, CURRENT_VERSION
     UPDATE_AVAILABLE = True
 except ImportError:
     UPDATE_AVAILABLE = False
@@ -240,11 +240,11 @@ def run_imgconvert(src_root, out_root, progress_cb=None):
 class App:
     def __init__(self, root):
         self.root = root
-        # 版本号动态(跟随update.py CURRENT_VERSION), Flex标识
+        # 版本号从 update.py 动态读取(发布只需改一处)
         try:
-            root.title(f"电商工具 {CURRENT_VERSION}-Flex (灵活开票版) BY 大萝北拔萝卜")
+            root.title("电商工具 " + CURRENT_VERSION)
         except Exception:
-            root.title("电商工具 v6.2.3-Flex (灵活开票版) BY 大萝北拔萝卜")
+            root.title("电商工具 v6.3.0-Flex (灵活开票版) BY 大萝北拔萝卜")
         root.geometry("780x700")
         root.minsize(700, 620)
 
@@ -1001,7 +1001,7 @@ class App:
 
         def _work():
             try:
-                asset = self_exe_name()
+                asset = self_asset_name()
                 info = check_update(asset_name=asset)
                 self.root.after(0, lambda: self._check_update_done(info))
             except Exception as e:
@@ -1078,7 +1078,7 @@ class App:
 
         def _do():
             try:
-                asset = self_exe_name()
+                asset = self_asset_name()
                 info = check_update(asset_name=asset)
                 if info and info["has_update"]:
                     self.root.after(0, lambda: self._show_silent_update(info))
