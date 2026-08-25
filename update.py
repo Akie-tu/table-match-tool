@@ -16,7 +16,7 @@ import urllib.request
 
 REPO = "Akie-tu/table-match-tool"
 # 当前版本 (打包时由构建注入, 或在此维护)
-CURRENT_VERSION = "v6.2.1"
+CURRENT_VERSION = "v6.2.2"
 
 
 def parse_version(tag):
@@ -96,15 +96,28 @@ def check_update(current=None, asset_name=None, timeout=15):
     }
 
 
-def download_file(url, dest, progress_cb=None, timeout=120):
-    """下载文件(支持进度回调), 返回 (ok, size, err)"""
+def _dl_single(url, dest, timeout=120, progress_cb=None):
+    """单通道下载(支持断点续传+大小校验), 返回 (ok, size, err)"""
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        # 已下载部分(续传)
+        resume_from = 0
+        if os.path.exists(dest):
+            resume_from = os.path.getsize(dest)
+        headers = {"User-Agent": "Mozilla/5.0"}
+        if resume_from > 0:
+            headers["Range"] = f"bytes={resume_from}-"
+        req = urllib.request.Request(url, headers=headers)
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             total = int(resp.headers.get("Content-Length") or 0)
-            got = 0
-            chunk = 64 * 1024
-            with open(dest, "wb") as f:
+            if resp.status == 206:  # 续传响应
+                total = resume_from + total
+            elif resume_from > 0:
+                # 服务器不支持Range, 重头下
+                resume_from = 0
+            got = resume_from
+            chunk = 128 * 1024
+            mode = "ab" if resume_from > 0 else "wb"
+            with open(dest, mode) as f:
                 while True:
                     buf = resp.read(chunk)
                     if not buf:
@@ -113,14 +126,42 @@ def download_file(url, dest, progress_cb=None, timeout=120):
                     got += len(buf)
                     if progress_cb and total:
                         progress_cb(got, total)
+            # 大小校验: Content-Length 已知且不匹配 → 失败重下
+            if total and got != total:
+                return False, got, f"大小不符({got}/{total})"
             return True, got, None
     except Exception as e:
-        try:
-            if os.path.exists(dest):
-                os.remove(dest)
-        except Exception:
-            pass
         return False, 0, str(e)
+
+
+def _mirror_urls(url, asset_name):
+    """生成多通道URL列表: 直连 + 镜像"""
+    mirrors = [
+        url,                                                  # 1. GitHub直连
+        f"https://ghfast.top/{url}",                          # 2. ghfast镜像
+        f"https://gh-proxy.com/{url}",                        # 3. gh-proxy镜像
+        f"https://ghproxy.net/{url}",                         # 4. ghproxy镜像
+    ]
+    return mirrors
+
+
+def download_file(url, dest, progress_cb=None, timeout=120):
+    """多通道下载(直连+镜像自动切换, 带断点续传+大小校验), 返回 (ok, size, err)"""
+    # 预检: 已存在且非0字节 → 尝试续传优先
+    for idx, u in enumerate(_mirror_urls(url, "")):
+        if os.path.exists(dest) and os.path.getsize(dest) > 0 and idx != 0:
+            # 续传优先走直连(第0个), 镜像不续传(避免错乱)
+            continue
+        ok, size, err = _dl_single(u, dest, timeout=timeout, progress_cb=progress_cb)
+        if ok:
+            return True, size, None
+        # 失败清理半成品? 保留以便下次续传, 但超过2次失败则重置
+        if idx >= 2 and os.path.exists(dest):
+            try:
+                os.remove(dest)
+            except Exception:
+                pass
+    return False, 0, "所有下载通道失败"
 
 
 def self_exe_name():
@@ -160,13 +201,24 @@ exit /b 0
 
 
 def run_updater(bat_path, new_exe, old_exe, temp_dir):
-    """启动 updater.bat 并退出当前程序"""
+    """启动 updater 并退出当前程序 — 无窗口运行"""
+    import subprocess
     try:
-        os.startfile(bat_path)  # Windows
+        if os.name == "nt":
+            # CREATE_NO_WINDOW=0x08000000 彻底隐藏cmd窗口
+            subprocess.Popen(["cmd", "/c", bat_path],
+                             creationflags=0x08000000,
+                             stdin=subprocess.DEVNULL,
+                             stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL,
+                             close_fds=True)
+        else:
+            subprocess.Popen(["bash", bat_path])
     except Exception:
-        import subprocess
-        subprocess.Popen(["cmd", "/c", bat_path],
-                         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+        try:
+            os.startfile(bat_path)
+        except Exception:
+            pass
 
 if __name__ == "__main__":
     info = check_update()
