@@ -16,7 +16,7 @@ import urllib.request
 
 REPO = "Akie-tu/table-match-tool"
 # 当前版本 (打包时由构建注入, 或在此维护)
-CURRENT_VERSION = "v6.3.8"
+CURRENT_VERSION = "v6.3.9"
 
 
 def parse_version(tag):
