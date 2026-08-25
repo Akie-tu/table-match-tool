@@ -244,9 +244,29 @@ class App:
         try:
             root.title("电商工具 " + CURRENT_VERSION)
         except Exception:
-            root.title("电商工具 v6.3.2-Flex (灵活开票版) BY 大萝北拔萝卜")
-        root.geometry("780x700")
-        root.minsize(700, 620)
+            root.title("电商工具 v6.3.3-Flex (灵活开票版) BY 大萝北拔萝卜")
+        root.geometry("780x720")
+        root.minsize(700, 640)
+
+        # 公共底部状态栏(所有Tab可见) — 必须先pack(占bottom), 否则被Notebook挤掉
+        status = ttk.Frame(root)
+        status.pack(side="bottom", fill="x", padx=10, pady=(0, 5))
+        try:
+            _cur_ver = CURRENT_VERSION
+        except Exception:
+            _cur_ver = "?"
+        self.status_ver = tk.StringVar(value=f"v{_cur_ver}")
+        # 版本号(点击可检查更新)
+        ver_lbl = ttk.Label(status, textvariable=self.status_ver, foreground="#666")
+        ver_lbl.pack(side="left")
+        ver_lbl.bind("<Button-1>", lambda e: self.check_update_btn())
+        ttk.Button(status, text="🔍 检查更新 (v)", command=self.check_update_btn).pack(side="right")
+        # 下载进度条(更新时显示)
+        self.dl_progress = ttk.Progressbar(status, mode="determinate", length=160)
+        self.dl_progress.pack(side="right", padx=8)
+        self.dl_progress.pack_forget()  # 默认隐藏, 下载时显示
+        self.dl_pct = tk.StringVar(value="")
+        ttk.Label(status, textvariable=self.dl_pct, width=8).pack(side="right")
 
         self.nb = ttk.Notebook(root)
         self.nb.pack(fill="both", expand=True, padx=6, pady=6)
@@ -255,21 +275,6 @@ class App:
         self.build_img_tab()
         self.build_invoice_tab()
         self.build_email_tab()
-
-        # 公共底部状态栏(所有Tab可见): 版本号 + 检查更新
-        status = ttk.Frame(root)
-        status.pack(fill="x", padx=10, pady=(0, 4))
-        try:
-            _cur_ver = CURRENT_VERSION
-        except Exception:
-            _cur_ver = "?"
-        self.status_ver = tk.StringVar(value=f"v{_cur_ver}")
-        # 显示版本号(点击可检查更新)
-        ver_lbl = ttk.Label(status, textvariable=self.status_ver, foreground="#666")
-        ver_lbl.pack(side="left")
-        ver_lbl.bind("<Button-1>", lambda e: self.check_update_btn())
-        ttk.Button(status, text="🔍 检查更新 (v)", command=self.check_update_btn).pack(side="right")
-        # 版本号显示在左下, 检查更新按钮右下 (署名在各Tab内)
 
     # ---------- Tab1 表格核对 ----------
     def build_match_tab(self):
@@ -1048,41 +1053,64 @@ class App:
         self.do_download_update(info)
 
     def do_download_update(self, info):
-        """下载新exe → 启动updater替换"""
+        """下载新exe → 启动updater替换 (目标固定标准名, 消除new_残留)"""
         url = info.get("download_url")
         if not url:
             _mtop('showerror', "错误", "未找到下载地址")
             return
         exe_name = self_exe_name()
         temp_dir = os.path.dirname(os.path.abspath(sys.executable if getattr(sys, "frozen", False) else __file__))
-        new_exe = os.path.join(temp_dir, f"new_{exe_name}")
-        self.log(self.inv_log, f"⬇ 下载中: {info['latest_tag']} ... (请稍候)")
+        # 下载临时名 = new_{标准资产名}, 替换目标 = 标准资产名(不管当前运行名)
+        std_name = self_asset_name()
+        new_exe = os.path.join(temp_dir, f"new_{std_name}")
+        target = os.path.join(temp_dir, std_name)
+        # 显示进度条
+        try:
+            self.dl_progress.pack(side="right", padx=8)
+            self.dl_progress["value"] = 0
+            self.dl_pct.set("0%")
+        except Exception:
+            pass
+
+        def _p(got, total):
+            # 线程中回调 → 主线程更新UI
+            if total:
+                pct = min(100, int(got * 100 / total))
+                self.root.after(0, lambda: (self.dl_progress.configure(value=pct),
+                                            self.dl_pct.set(f"{pct}%")))
+
+        self.log(self.inv_log, f"⬇ 下载中: {info['latest_tag']} ({std_name})")
         # 后台线程下载, 避免阻塞UI
         import threading
 
         def _work():
-            ok, size, err = download_file(url, new_exe, timeout=180)
-            self.root.after(0, lambda: self._download_done(info, ok, size, err, new_exe, exe_name, temp_dir))
+            ok, size, err = download_file(url, new_exe, timeout=300, progress_cb=_p)
+            self.root.after(0, lambda: self._download_done(info, ok, size, err, new_exe, exe_name, target, temp_dir))
 
         t = threading.Thread(target=_work, daemon=True)
         t.start()
 
-    def _download_done(self, info, ok, size, err, new_exe, exe_name, temp_dir):
+    def _download_done(self, info, ok, size, err, new_exe, exe_name, target, temp_dir):
+        # 隐藏进度条
+        try:
+            self.dl_progress.pack_forget()
+        except Exception:
+            pass
         if not ok:
             url = info.get("download_url", "")
             self.log(self.inv_log, f"❌ 下载失败: {err}")
             _mtop('showerror', "下载失败", f"请手动下载:\n{url}\n\n{err}")
             return
         self.log(self.inv_log, f"✅ 下载完成 ({size/1024/1024:.1f}MB), 准备更新...")
-        # 生成 updater.bat 并启动
+        # 生成 updater.bat 并启动 (替换目标=标准名)
         old_exe = exe_name
-        bat = make_updater_bat(new_exe, old_exe, temp_dir)
+        bat = make_updater_bat(new_exe, old_exe, temp_dir, target=target)
         bat_path = os.path.join(temp_dir, "updater.bat")
         with open(bat_path, "w", encoding="ascii") as f:
             f.write(bat)
         self.log(self.inv_log, "🔄 3秒后自动替换并重启...")
         _mtop('showinfo', "更新", "下载完成, 程序将自动更新并重启")
-        self.root.after(3000, lambda: (run_updater(bat_path, new_exe, old_exe, temp_dir),
+        self.root.after(3000, lambda: (run_updater(bat_path, new_exe, exe_name, temp_dir),
                                        self.root.quit()))
 
     def check_update_silent(self):

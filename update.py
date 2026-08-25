@@ -16,7 +16,7 @@ import urllib.request
 
 REPO = "Akie-tu/table-match-tool"
 # 当前版本 (打包时由构建注入, 或在此维护)
-CURRENT_VERSION = "v6.3.2"
+CURRENT_VERSION = "v6.3.3"
 
 
 def parse_version(tag):
@@ -198,10 +198,11 @@ def self_asset_name():
     return "table-match-gui.exe"
 
 
-def make_updater_bat(new_exe, old_exe, temp_dir):
+def make_updater_bat(new_exe, old_exe, temp_dir, target=None):
     """
     生成 updater.bat (纯ASCII): 等待主进程退出→替换exe→重启
     全部用绝对路径 + cd /d 到exe目录(修复Security validation/path失败)
+    target: 替换目标路径(标准名)。若当前运行exe名≠标准名(new_残留), 删除旧的并启动标准名
     Windows CMD 的 GBK 编码, bat 必须纯 ASCII (windows-bat-encoding skill)
     """
     # 绝对路径(带引号处理) — Windows盘符在Linux isabs不识别, 用splitdrive兼容
@@ -212,10 +213,15 @@ def make_updater_bat(new_exe, old_exe, temp_dir):
 
     new_exe = _abs(new_exe, temp_dir)
     old_exe = _abs(old_exe, temp_dir)
-    # tasklist IMAGENAME 只认文件名; 手动split兼容Linux测试(Windows分隔符\和/都处理)
+    if target:
+        target = _abs(target, temp_dir)
+    else:
+        target = new_exe.replace("\\new_", "\\")  # new_X → X 默认
+    # tasklist IMAGENAME 只认文件名; 手动split兼容Linux测试
     old_name = old_exe.replace("/", "\\").split("\\")[-1]
     new_q = f'"{new_exe}"'
     old_q = f'"{old_exe}"'
+    tgt_q = f'"{target}"'
     dir_q = f'"{temp_dir}"'
     bat = f"""@echo off
 setlocal
@@ -232,14 +238,18 @@ if %errorlevel%==0 (
   goto loop
 )
 :force
-rem replace (move = 原子替换, 避免文件锁定)
-move /y {new_q} {old_q} >nul 2>&1
+rem 若当前exe名不是标准名(new_残留), 先删掉它
+if /I not {old_q}=={tgt_q} (
+  del "{old_exe}" >nul 2>&1
+)
+rem 移到标准名(move = 原子替换)
+move /y {new_q} {tgt_q} >nul 2>&1
 if %errorlevel%==0 goto restart
 echo FAILED_TO_REPLACE > {dir_q}\\updater_result.txt
 exit /b 1
 :restart
 echo OK > {dir_q}\\updater_result.txt
-start "" {old_q}
+start "" {tgt_q}
 exit /b 0
 """
     return bat
