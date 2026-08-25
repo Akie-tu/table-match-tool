@@ -240,7 +240,7 @@ def run_imgconvert(src_root, out_root, progress_cb=None):
 class App:
     def __init__(self, root):
         self.root = root
-        root.title("电商工具 v6.1.10")
+        root.title("电商工具 v6.1.11")
         root.geometry("780x700")
         root.minsize(700, 620)
 

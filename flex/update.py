@@ -37,13 +37,33 @@ def version_gt(a, b):
 
 
 def get_latest_release(timeout=15):
-    """查询最新Release, 返回 (tag, body, assets) 或 None(失败/无更新)"""
-    url = f"https://api.github.com/repos/{REPO}/releases/latest"
-    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        d = json.loads(r.read().decode())
-    assets = {a["name"]: a["browser_download_url"] for a in d.get("assets", [])}
-    return d.get("tag_name"), d.get("body") or "", assets
+    """查询最新Release, 返回 (tag, body, assets) 或 None(失败/无更新)
+    双通道: 先API, 失败fallback网页版(国内api.github.com常被墙但网页可达)"""
+    # 通道1: API
+    try:
+        url = f"https://api.github.com/repos/{REPO}/releases/latest"
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            d = json.loads(r.read().decode())
+        assets = {a["name"]: a["browser_download_url"] for a in d.get("assets", [])}
+        return d.get("tag_name"), d.get("body") or "", assets
+    except Exception:
+        pass
+    # 通道2: 网页版 (releases/latest 302重定向 → /releases/tag/vX.Y.Z)
+    try:
+        url = f"https://github.com/{REPO}/releases/latest"
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"}, method="HEAD")
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            final = r.geturl()
+        m = re.search(r"/releases/tag/([^/?#]+)", final)
+        if not m:
+            return None
+        tag = m.group(1)
+        # 资产直链: releases/download/{tag}/{asset}
+        # asset名即exe文件名, 由check_update传入
+        return tag, "", {}
+    except Exception:
+        return None
 
 
 def check_update(current=None, asset_name=None, timeout=15):
@@ -53,13 +73,19 @@ def check_update(current=None, asset_name=None, timeout=15):
     """
     cur = current or CURRENT_VERSION
     try:
-        tag, body, assets = get_latest_release(timeout=timeout)
+        result = get_latest_release(timeout=timeout)
+        if result is None:
+            return None
+        tag, body, assets = result
     except Exception:
         return None  # 网络/API失败
     if not tag:
         return None
     has = version_gt(tag, cur)
     url = assets.get(asset_name) if asset_name else (list(assets.values())[0] if assets else None)
+    if not url and asset_name and tag:
+        # 网页通道: 用直链下载
+        url = f"https://github.com/{REPO}/releases/download/{tag}/{asset_name}"
     return {
         "latest_tag": tag,
         "current_tag": cur,
