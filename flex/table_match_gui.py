@@ -244,7 +244,7 @@ class App:
         try:
             root.title("电商工具 " + CURRENT_VERSION)
         except Exception:
-            root.title("电商工具 v6.3.5-Flex (灵活开票版) BY 大萝北拔萝卜")
+            root.title("电商工具 v6.3.6-Flex (灵活开票版) BY 大萝北拔萝卜")
         root.geometry("780x720")
         root.minsize(700, 640)
 
@@ -401,12 +401,13 @@ class App:
         # 1. 可编辑发票表格 (每行一个输入框 = 每行一张发票)
         frm2 = ttk.LabelFrame(tab, text="发票录入表 — 双击单元格填写; 点选某列后Ctrl+V只粘该列; 整块复制自动对齐 (每行一张发票)")
         frm2.pack(fill="both", expand=True, padx=10, pady=5)
-        cols = ("serial", "buyer", "taxid", "natural", "qty", "amount", "remark")
-        self.inv_tree = ttk.Treeview(frm2, columns=cols, show="headings", height=14)
-        headers = {"serial": "流水号", "buyer": "购买方名称*", "taxid": "纳税人识别号",
+        cols = ("serial", "invtype", "taxinc", "buyer", "taxid", "natural", "qty", "amount", "remark")
+        self.inv_tree = ttk.Treeview(frm2, columns=cols, show="headings", height=12)
+        headers = {"serial": "流水号", "invtype": "发票类型", "taxinc": "含税",
+                   "buyer": "购买方名称*", "taxid": "纳税人识别号",
                    "natural": "自然人", "qty": "数量", "amount": "金额*", "remark": "备注"}
-        widths = {"serial": 55, "buyer": 200, "taxid": 170, "natural": 55,
-                  "qty": 55, "amount": 85, "remark": 130}
+        widths = {"serial": 48, "invtype": 90, "taxinc": 48, "buyer": 150, "taxid": 150,
+                  "natural": 50, "qty": 50, "amount": 80, "remark": 110}
         for c in cols:
             self.inv_tree.heading(c, text=headers[c])
             self.inv_tree.column(c, width=widths[c], anchor="w")
@@ -440,7 +441,7 @@ class App:
             self._inv_zebra = None
         self.inv_tree.pack(side="left", fill="both", expand=True, padx=(5, 0), pady=5)
         vsb.pack(side="right", fill="y", pady=5)
-        self.invoices = []  # 数据模型: [{buyer,tax_id,is_natural,qty,amount,remark}]
+        self.invoices = []  # 数据模型: [{invoice_type,tax_included,buyer,tax_id,is_natural,qty,amount,remark}]
         self._inv_editing = None  # 当前编辑状态 (entry, row_id, col_idx)
         self._inv_click_col = None  # 粘贴起点列(点选记录) 0=名称 1=税号 2=自然人 3=数量 4=金额 5=备注
         self._inv_click_row = None  # 粘贴起点行索引
@@ -461,7 +462,7 @@ class App:
         ttk.Button(frm3, text="清空", command=self.invoice_clear).pack(side="left", padx=5)
         ttk.Label(frm3, text="单列粘贴→:").pack(side="left", padx=(12, 2))
         self.inv_paste_col = tk.StringVar(value="自动")
-        paste_opts = ["自动", "名称", "税号", "自然人", "数量", "金额", "备注"]
+        paste_opts = ["自动", "发票类型", "含税", "名称", "税号", "自然人", "数量", "金额", "备注"]
         ttk.Combobox(frm3, textvariable=self.inv_paste_col, values=paste_opts,
                      width=5, state="readonly").pack(side="left", padx=2)
         ttk.Button(frm3, text="▶ 生成开票xlsx", command=self.invoice_generate).pack(side="right", padx=5)
@@ -635,7 +636,7 @@ class App:
             _mtop('showerror', "发送失败", str(msg))
 
     # ---------- 可编辑表格支持 ----------
-    INV_COLS = ("serial", "buyer", "taxid", "natural", "qty", "amount", "remark")
+    INV_COLS = ("serial", "invtype", "taxinc", "buyer", "taxid", "natural", "qty", "amount", "remark")
 
     def _inv_close_editor(self):
         """关闭当前编辑器"""
@@ -659,7 +660,7 @@ class App:
         col_idx = int(col_id.replace("#", "")) - 1
         if col_idx <= 0:  # 流水号列忽略
             return
-        map_col = {"#2": 0, "#3": 1, "#4": 2, "#5": 3, "#6": 4, "#7": 5}
+        map_col = {"#3": 0, "#4": 1, "#5": 2, "#6": 3, "#7": 4, "#8": 5, "#9": 6}
         col_key = map_col.get(col_id, None)
         if col_key is None:
             return
@@ -691,6 +692,30 @@ class App:
             return
         cur_val = self.inv_tree.set(row_id, col_id)
 
+        # 发票类型/含税列 → 下拉选择(替代手动输入)
+        if col_id in ("#2", "#3"):
+            opts = ["普通发票", "增值税专用发票"] if col_id == "#2" else ["是", "否"]
+            combo = ttk.Combobox(self.inv_tree, values=opts, state="readonly", width=w // 9)
+            combo.place(x=x, y=y, width=w, height=h)
+            combo.set(cur_val or opts[0])
+
+            def save_combo(_=None):
+                val = combo.get().strip()
+                self._inv_close_editor()
+                self.inv_tree.set(row_id, col_id, val)
+                idx = self.inv_tree.index(row_id)
+                key2 = ("serial", "invoice_type", "tax_included", "buyer", "tax_id", "is_natural", "qty", "amount", "remark")[col_idx]
+                if idx < len(self.invoices) and key2 not in ("serial",):
+                    self.invoices[idx][key2] = val
+                self.invoice_refresh_tree()
+
+            combo.bind("<<ComboboxSelected>>", save_combo)
+            combo.bind("<FocusOut>", save_combo)
+            combo.bind("<Return>", save_combo)
+            self._inv_editing = (combo, row_id, col_idx)
+            combo.focus_set()
+            return
+
         entry = tk.Entry(self.inv_tree, font=("Microsoft YaHei", 9))
         entry.place(x=x, y=y, width=w, height=h)
         entry.insert(0, cur_val or "")
@@ -703,7 +728,7 @@ class App:
             self.inv_tree.set(row_id, col_id, val)
             # 同步数据模型
             idx = self.inv_tree.index(row_id)
-            key = ("serial", "buyer", "tax_id", "is_natural", "qty", "amount", "remark")[col_idx]
+            key = ("serial", "invoice_type", "tax_included", "buyer", "tax_id", "is_natural", "qty", "amount", "remark")[col_idx]
             if 0 <= idx < len(self.invoices):
                 if key == "is_natural":
                     self.invoices[idx][key] = "是" if val == "是" else (val or "")
@@ -752,8 +777,9 @@ class App:
         #  3) 单列纯数字: 全小数→金额; 全整数且≤4位→数量; 长数字(>4位, 如订单号)→备注
         #  4) 单列文字/"是/否": 名称列
         ncols_data = max(len(r) for r in rows)
-        key_cols = ("buyer", "tax_id", "is_natural", "qty", "amount", "remark")
-        manual = {"名称": 0, "税号": 1, "自然人": 2, "数量": 3, "金额": 4, "备注": 5}.get(
+        key_cols = ("invoice_type", "tax_included", "buyer", "tax_id", "is_natural", "qty", "amount", "remark")
+        manual = {"发票类型": 0, "含税": 1, "名称": 2, "税号": 3, "自然人": 4,
+                  "数量": 5, "金额": 6, "备注": 7}.get(
             self.inv_paste_col.get().strip(), -1)
 
         if self._inv_click_col is not None:
@@ -769,20 +795,20 @@ class App:
                     if j < len(r) and r[j].strip():
                         if "." in r[j] or "．" in r[j]:
                             col_has_decimal[j] = True
-            # 有小数列视为金额, 另一列视为数量
+            # 有小数列视为金额(下标6), 另一列视为数量(下标5)
             if col_has_decimal[0] and not col_has_decimal[1]:
-                start_key = 4  # 第1列金额(下标4), 第2列数量(下标3)
+                start_key = 6  # 第1列金额(下标6), 第2列数量(下标5)
             elif col_has_decimal[1] and not col_has_decimal[0]:
-                start_key = 3  # 第1列数量(下标3), 第2列金额(下标4)
+                start_key = 5  # 第1列数量(下标5), 第2列金额(下标6)
             else:
-                start_key = 3  # 两列都整数或都小数 → 数量起(保守)
+                start_key = 5  # 两列都整数或都小数 → 数量起(保守)
         elif ncols_data >= 2:
-            start_key = 0  # 多列从名称开始
+            start_key = 2  # 多列从名称开始(下标2=名称)
         elif all(_looks_like_number(c) for r in rows for c in r if c.strip()):
             # 单列纯数字
             has_decimal = any("." in c or "．" in c for r in rows for c in r if c.strip())
             if has_decimal:
-                start_key = 4  # 金额(含小数)
+                start_key = 6  # 金额(含小数)
             else:
                 # 全整数: 检查最大位数, >4位(订单号/长编码) → 备注
                 max_digits = 0
@@ -793,25 +819,26 @@ class App:
                         if digits_only:
                             max_digits = max(max_digits, len(digits_only))
                 if max_digits > 4:
-                    start_key = 5  # 备注(长数字如订单号)
+                    start_key = 7  # 备注(长数字如订单号)
                 else:
-                    start_key = 3  # 数量(小整数)
+                    start_key = 5  # 数量(小整数)
         else:
-            start_key = 0  # 单列文字→名称
+            start_key = 2  # 单列文字→名称(下标2)
 
         # 需要粘贴的总行数(扩展)
         need = start_row + len(rows)
         while len(self.invoices) < need:
-            self.invoices.append({"buyer": "", "tax_id": "", "is_natural": "",
+            self.invoices.append({"invoice_type": self.inv_type.get(), "tax_included": self.inv_taxinc.get(),
+                                  "buyer": "", "tax_id": "", "is_natural": "",
                                   "qty": "", "amount": "", "remark": ""})
         self.invoice_refresh_tree()
 
         # 逐格写入
         # 特殊: 两列纯数字(金额+数量) → 直接映射列(不靠偏移)
-        twocol_numeric = (ncols_data == 2 and start_key in (3, 4)
+        twocol_numeric = (ncols_data == 2 and start_key in (5, 6)
                           and all(all(_looks_like_number(c) for c in r if c.strip()) for r in rows))
         if twocol_numeric:
-            # 第1列/第2列 → 数量(3) 或 金额(4), 按含小数分配
+            # 第1列/第2列 → 数量(5) 或 金额(6), 按含小数分配
             col_has_dec = [False, False]
             for r in rows:
                 for j in (0, 1):
@@ -862,7 +889,10 @@ class App:
         self.inv_tree.delete(*self.inv_tree.get_children())
         for i, inv in enumerate(self.invoices, 1):
             self.inv_tree.insert("", "end", values=(
-                f"{i:03d}", inv.get("buyer", ""), inv.get("tax_id", ""),
+                f"{i:03d}",
+                inv.get("invoice_type", "") or self.inv_type.get(),
+                inv.get("tax_included", "") or self.inv_taxinc.get(),
+                inv.get("buyer", ""), inv.get("tax_id", ""),
                 inv.get("is_natural", "") or "", inv.get("qty", ""),
                 inv.get("amount", ""), inv.get("remark", "")))
         # 斑马纹(网格横线感)
@@ -871,7 +901,8 @@ class App:
 
     def invoice_add_row(self):
         """新增一行(空发票), 自动进入编辑"""
-        self.invoices.append({"buyer": "", "tax_id": "", "is_natural": "",
+        self.invoices.append({"invoice_type": self.inv_type.get(), "tax_included": self.inv_taxinc.get(),
+                              "buyer": "", "tax_id": "", "is_natural": "",
                               "qty": "", "amount": "", "remark": ""})
         self.invoice_refresh_tree()
         children = self.inv_tree.get_children()
@@ -902,14 +933,16 @@ class App:
     def invoice_clear_col(self):
         """清空选中的某一列所有行的数据(使用上次点选的列或下拉指定列)"""
         # 优先: 点选的列; 其次: 下拉"单列粘贴"手动指定
-        COL_KEY_MAP = {"名称": "buyer", "税号": "tax_id", "自然人": "is_natural",
+        COL_KEY_MAP = {"发票类型": "invoice_type", "含税": "tax_included",
+                       "名称": "buyer", "税号": "tax_id", "自然人": "is_natural",
                        "数量": "qty", "金额": "amount", "备注": "remark"}
         col_key = None
         col_label = None
         if self._inv_click_col is not None:
-            # _inv_click_col: 0=名称 1=税号 2=自然人 3=数量 4=金额 5=备注 (与粘贴一致)
-            key_names = ("buyer", "tax_id", "is_natural", "qty", "amount", "remark")
-            labels = ("购买方名称", "纳税人识别号", "自然人", "数量", "金额", "备注")
+            # _inv_click_col: 0=发票类型 1=含税 2=名称 3=税号 4=自然人 5=数量 6=金额 7=备注
+            key_names = ("invoice_type", "tax_included", "buyer", "tax_id", "is_natural",
+                         "qty", "amount", "remark")
+            labels = ("发票类型", "含税", "购买方名称", "纳税人识别号", "自然人", "数量", "金额", "备注")
             if 0 <= self._inv_click_col < len(key_names):
                 col_key = key_names[self._inv_click_col]
                 col_label = labels[self._inv_click_col]
@@ -990,7 +1023,14 @@ class App:
             "unit": self.inv_unit.get().strip(),
             "tax_rate": self.inv_rate.get().strip(),
         }
-        invoices = [{**inv, **fixed} for inv in self.invoices]
+        # 行级值优先, 空则用固定内容默认
+        invoices = []
+        for inv in self.invoices:
+            merged = dict(inv)
+            for k, v in fixed.items():
+                if not str(merged.get(k, "") or "").strip():
+                    merged[k] = v
+            invoices.append(merged)
         tpl = self.inv_tpl.get().strip().strip('"') or find_template()
 
         out = filedialog.asksaveasfilename(
