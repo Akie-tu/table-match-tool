@@ -240,7 +240,11 @@ def run_imgconvert(src_root, out_root, progress_cb=None):
 class App:
     def __init__(self, root):
         self.root = root
-        root.title("电商工具 v1.0-Flex (灵活开票版) BY 大萝北拔萝卜")
+        # 版本号动态(跟随update.py CURRENT_VERSION), Flex标识
+        try:
+            root.title(f"电商工具 {CURRENT_VERSION}-Flex (灵活开票版) BY 大萝北拔萝卜")
+        except Exception:
+            root.title("电商工具 v6.2.1-Flex (灵活开票版) BY 大萝北拔萝卜")
         root.geometry("780x700")
         root.minsize(700, 620)
 
