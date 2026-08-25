@@ -244,7 +244,7 @@ class App:
         try:
             root.title("电商工具 " + CURRENT_VERSION)
         except Exception:
-            root.title("电商工具 v6.3.3")
+            root.title("电商工具 v6.3.4")
         root.geometry("780x720")
         root.minsize(700, 640)
 
@@ -260,7 +260,12 @@ class App:
         ver_lbl = ttk.Label(status, textvariable=self.status_ver, foreground="#666")
         ver_lbl.pack(side="left")
         ver_lbl.bind("<Button-1>", lambda e: self.check_update_btn())
-        ttk.Button(status, text="🔍 检查更新 (v)", command=self.check_update_btn).pack(side="right")
+        # 全局状态信息(所有Tab可见)
+        self.status_msg = tk.StringVar(value="")
+        ttk.Label(status, textvariable=self.status_msg, foreground="#2a7", width=36).pack(side="left", padx=10)
+        # 检查更新按钮(保存引用以便改提示文字)
+        self.update_btn = ttk.Button(status, text="🔍 检查更新 (v)", command=self.check_update_btn)
+        self.update_btn.pack(side="right")
         # 下载进度条(更新时显示)
         self.dl_progress = ttk.Progressbar(status, mode="determinate", length=160)
         self.dl_progress.pack(side="right", padx=8)
@@ -1010,11 +1015,16 @@ class App:
 
     # ---------- 内置更新 ----------
     def check_update_btn(self):
-        """手动检查更新按钮 (后台线程, 不阻塞UI)"""
+        """手动检查更新按钮 (后台线程, 不阻塞UI; 防重入)"""
         if not UPDATE_AVAILABLE:
             _mtop('showinfo', "提示", "更新模块未加载")
             return
-        self.log(self.inv_log, "🔍 检查更新中... (请稍候)")
+        if getattr(self, "_checking", False):
+            self.set_global_msg("⏳ 正在检查更新中, 请稍候...")
+            return
+        self._checking = True
+        self.set_global_msg("🔍 检查更新中...")
+        self.update_btn_hint()
         import threading
 
         def _work():
@@ -1028,19 +1038,38 @@ class App:
         t = threading.Thread(target=_work, daemon=True)
         t.start()
 
+    def set_global_msg(self, text):
+        """全局状态信息(所有Tab可见), 不再写到开票页log"""
+        try:
+            self.status_msg.set(text)
+        except Exception:
+            pass
+
+    def update_btn_hint(self):
+        """检查更新按钮提示文字"""
+        try:
+            self.update_btn.config(text="🔍 检查更新 (v)" if not getattr(self, "_update_avail", False)
+                                   else "✨ 发现新版本!")
+        except Exception:
+            pass
+
     def _check_update_done(self, info, err=None):
+        self._checking = False
         if err:
-            self.log(self.inv_log, f"❌ 更新检查错误: {err}")
+            self.set_global_msg(f"❌ 更新检查错误: {err}")
             _mtop('showerror', "错误", str(err))
             return
         if info is None:
-            self.log(self.inv_log, "⚠️ 检查失败(网络/API不可达)")
+            self.set_global_msg("⚠️ 检查失败(网络/API不可达)")
             _mtop('showwarning', "提示", "检查更新失败, 请检查网络")
             return
         if not info["has_update"]:
-            self.log(self.inv_log, f"✅ 已是最新版本 ({info['current_tag']})")
+            self.set_global_msg(f"✅ 已是最新版本 ({info['current_tag']})")
             _mtop('showinfo', "提示", f"已是最新版本 {info['current_tag']}")
             return
+        # 有更新: 标记按钮 + 弹窗(仅手动检查时弹, 静默只标记)
+        self._update_avail = True
+        self.update_btn_hint()
         body = (info["body"] or "").strip()
         body_preview = "\n".join(body.splitlines()[:6]) if body else "(无更新日志)"
         if not _mtop('askyesno', "发现新版本",
@@ -1113,7 +1142,7 @@ class App:
                                        self.root.quit()))
 
     def check_update_silent(self):
-        """启动时后台静默检查(不打扰), 有更新才提示"""
+        """启动时后台静默检查(不打扰): 有更新只标记按钮, 不弹窗(防双弹窗)"""
         if not UPDATE_AVAILABLE:
             return
 
@@ -1122,13 +1151,20 @@ class App:
                 asset = self_asset_name()
                 info = check_update(asset_name=asset)
                 if info and info["has_update"]:
-                    self.root.after(0, lambda: self._show_silent_update(info))
+                    # 只标记按钮提示, 不自动弹窗
+                    self.root.after(0, lambda: self._mark_update_avail(info))
             except Exception:
                 pass
 
         import threading
         t = threading.Thread(target=_do, daemon=True)
         t.start()
+
+    def _mark_update_avail(self, info):
+        self._update_avail = True
+        if not getattr(self, "_checking", False):
+            self.update_btn_hint()
+            self.set_global_msg(f"✨ 发现新版本 {info['latest_tag']} — 点击右上角检查更新")
 
     def _show_silent_update(self, info):
         body = (info["body"] or "").strip()
