@@ -16,14 +16,14 @@ import shutil
 
 import openpyxl
 
-# ---------- 默认固定内容 (灵活版: 项目/编码/单位/税率不固定, 留空手填) ----------
+# ---------- 默认固定内容 ----------
 DEFAULT_FIXED = {
     "invoice_type": "普通发票",      # 发票类型
     "tax_included": "是",            # 是否含税
-    "item_name": "",                 # 项目名称 (灵活版: 每次手填)
-    "tax_code": "",                  # 商品和服务税收编码 (灵活版: 每次手填)
-    "unit": "",                      # 单位 (灵活版: 每次手填)
-    "tax_rate": "",                  # 税率 (灵活版: 每次手填)
+    "item_name": "滤芯",             # 项目名称
+    "tax_code": "1090130020000000000",  # 商品和服务税收编码
+    "unit": "个",                    # 单位
+    "tax_rate": "0.01",              # 税率(1%)
 }
 
 # 模板缓存路径(本机) / 打包时用内置副本
@@ -45,7 +45,7 @@ COL_ITEM = {
     "单位": 5, "数量": 6, "单价": 7, "金额": 8, "税率": 9,
 }
 
-INVOICE_TYPE_OPTIONS = ["普通发票", "专用发票", "电子普通发票", "电子专用发票"]
+INVOICE_TYPE_OPTIONS = ["普通发票", "增值税专用发票"]
 
 
 def find_template():
@@ -112,12 +112,6 @@ def validate_invoice(inv, idx):
             float(str(qty))
         except ValueError:
             errs.append(f"第{idx}行: 数量不是数字({qty})")
-    # 灵活版: 项目名称/税收编码/单位/税率 必填(不固定, 生成时校验)
-    for field, label in (("item_name", "项目名称"), ("tax_code", "税收编码"),
-                         ("unit", "单位"), ("tax_rate", "税率")):
-        v = str(inv.get(field, "") or "").strip()
-        if not v:
-            errs.append(f"第{idx}行: {label}为空(请在上方固定内容栏填写)")
     return errs
 
 

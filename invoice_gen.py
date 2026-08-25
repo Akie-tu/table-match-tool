@@ -45,7 +45,7 @@ COL_ITEM = {
     "单位": 5, "数量": 6, "单价": 7, "金额": 8, "税率": 9,
 }
 
-INVOICE_TYPE_OPTIONS = ["普通发票", "专用发票", "电子普通发票", "电子专用发票"]
+INVOICE_TYPE_OPTIONS = ["普通发票", "增值税专用发票"]
 
 
 def find_template():

@@ -244,7 +244,7 @@ class App:
         try:
             root.title("电商工具 " + CURRENT_VERSION)
         except Exception:
-            root.title("电商工具 v6.3.7")
+            root.title("电商工具 v6.3.8")
         root.geometry("780x720")
         root.minsize(700, 640)
 
@@ -649,6 +649,8 @@ class App:
 
     def inv_click_col(self, event):
         """单击单元格 → 记录粘贴起点(行+列)。下次Ctrl+V从该格开始, 粘完自动恢复自动"""
+        # 单击时关闭残留编辑器(下拉/输入框)
+        self._inv_close_editor()
         region = self.inv_tree.identify("region", event.x, event.y)
         if region != "cell":
             return
@@ -709,9 +711,12 @@ class App:
                     self.invoices[idx][key2] = val
                 self.invoice_refresh_tree()
 
+            def cancel_combo(_=None):
+                self._inv_close_editor()
+
+            # 只绑选中保存; 不绑FocusOut(点下拉箭头展开列表会误触发导致关闭)
             combo.bind("<<ComboboxSelected>>", save_combo)
-            combo.bind("<FocusOut>", save_combo)
-            combo.bind("<Return>", save_combo)
+            combo.bind("<Escape>", cancel_combo)
             self._inv_editing = (combo, row_id, col_idx)
             combo.focus_set()
             return
