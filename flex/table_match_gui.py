@@ -283,9 +283,9 @@ class App:
         try:
             root.title("电商工具 " + CURRENT_VERSION)
         except Exception:
-            root.title("电商工具 v6.4.0-Flex (灵活开票版) BY 大萝北拔萝卜")
-        root.geometry("780x720")
-        root.minsize(700, 640)
+            root.title("电商工具 v6.4.1-Flex (灵活开票版) BY 大萝北拔萝卜")
+        root.geometry("920x780")
+        root.minsize(840, 700)
 
         # 公共底部状态栏(所有Tab可见) — 必须先pack(占bottom), 否则被Notebook挤掉
         status = ttk.Frame(root)
@@ -348,14 +348,13 @@ class App:
         frm3 = ttk.LabelFrame(tab, text="3. 回填映射 (源列 → 目标列)")
         frm3.pack(fill="x", padx=10, pady=5)
         self.map_rows = []
-        self._add_row(frm3)
         self.add_btn = ttk.Button(frm3, text="+ 添加映射", command=lambda: self._add_row(frm3))
         self.add_btn.pack(anchor="w", padx=10, pady=3)
 
         frm4 = ttk.LabelFrame(tab, text="4. 多规格标记 (可空)")
         frm4.pack(fill="x", padx=10, pady=5)
-        self.sku_col = tk.StringVar()
-        self.rmk_col = tk.StringVar()
+        self.sku_col = tk.StringVar(value="备注")
+        self.rmk_col = tk.StringVar(value="备注")
         ttk.Label(frm4, text="多规格判断列:").grid(row=0, column=0, padx=5)
         ttk.Entry(frm4, textvariable=self.sku_col, width=18).grid(row=0, column=1, padx=5)
         ttk.Label(frm4, text="备注列:").grid(row=0, column=2, padx=5)
@@ -403,8 +402,8 @@ class App:
         tab = ttk.Frame(self.nb)
         self.nb.add(tab, text="③ 开票生成")
 
-        # 0. 固定内容配置 (多行grid, 不挤宽度, 窗口可扩大)
-        frm0 = ttk.LabelFrame(tab, text="开票内容 (每次开票填写: 项目名称/税收编码/单位/税率)")
+        # 0. 固定内容配置 (紧凑2行)
+        frm0 = ttk.LabelFrame(tab, text="固定内容 (默认值, 可修改; 个别发票在表格内下拉修改)")
         frm0.pack(fill="x", padx=10, pady=5)
         self.inv_type = tk.StringVar(value=DEFAULT_FIXED["invoice_type"])
         self.inv_taxinc = tk.StringVar(value=DEFAULT_FIXED["tax_included"])
@@ -412,30 +411,26 @@ class App:
         self.inv_code = tk.StringVar(value=DEFAULT_FIXED["tax_code"])
         self.inv_unit = tk.StringVar(value=DEFAULT_FIXED["unit"])
         self.inv_rate = tk.StringVar(value=DEFAULT_FIXED["tax_rate"])
-        # grid 布局: 每行3组 (标签+控件)
         row = 0
-        ttk.Label(frm0, text="发票类型:").grid(row=row, column=0, sticky="e", padx=(8, 2), pady=3)
+        ttk.Label(frm0, text="发票类型:").grid(row=row, column=0, sticky="e", padx=(6, 2), pady=2)
         ttk.Combobox(frm0, textvariable=self.inv_type, values=INVOICE_TYPE_OPTIONS,
-                     width=12, state="readonly").grid(row=row, column=1, sticky="w", padx=(0, 10), pady=3)
-        ttk.Label(frm0, text="是否含税:").grid(row=row, column=2, sticky="e", padx=(8, 2), pady=3)
+                     width=10, state="readonly").grid(row=row, column=1, sticky="w", padx=(0, 6), pady=2)
+        ttk.Label(frm0, text="含税:").grid(row=row, column=2, sticky="e", padx=(6, 2), pady=2)
         ttk.Combobox(frm0, textvariable=self.inv_taxinc, values=["是", "否"],
-                     width=4, state="readonly").grid(row=row, column=3, sticky="w", padx=(0, 10), pady=3)
-        ttk.Label(frm0, text="项目名称:").grid(row=row, column=4, sticky="e", padx=(8, 2), pady=3)
-        ttk.Entry(frm0, textvariable=self.inv_item, width=10).grid(row=row, column=5, sticky="w", padx=(0, 10), pady=3)
-        row += 1
-        ttk.Label(frm0, text="税收编码:").grid(row=row, column=0, sticky="e", padx=(8, 2), pady=3)
-        ttk.Entry(frm0, textvariable=self.inv_code, width=22).grid(row=row, column=1, sticky="w", padx=(0, 10), pady=3)
-        ttk.Label(frm0, text="单位:").grid(row=row, column=2, sticky="e", padx=(8, 2), pady=3)
-        ttk.Entry(frm0, textvariable=self.inv_unit, width=4).grid(row=row, column=3, sticky="w", padx=(0, 10), pady=3)
-        ttk.Label(frm0, text="税率:").grid(row=row, column=4, sticky="e", padx=(8, 2), pady=3)
-        ttk.Entry(frm0, textvariable=self.inv_rate, width=6).grid(row=row, column=5, sticky="w", padx=(0, 10), pady=3)
+                     width=3, state="readonly").grid(row=row, column=3, sticky="w", padx=(0, 6), pady=2)
+        ttk.Label(frm0, text="项目:").grid(row=row, column=4, sticky="e", padx=(6, 2), pady=2)
+        ttk.Entry(frm0, textvariable=self.inv_item, width=8).grid(row=row, column=5, sticky="w", padx=(0, 6), pady=2)
+        ttk.Label(frm0, text="编码:").grid(row=row, column=6, sticky="e", padx=(6, 2), pady=2)
+        ttk.Entry(frm0, textvariable=self.inv_code, width=18).grid(row=row, column=7, sticky="w", padx=(0, 6), pady=2)
+        ttk.Label(frm0, text="单位:").grid(row=row, column=8, sticky="e", padx=(6, 2), pady=2)
+        ttk.Entry(frm0, textvariable=self.inv_unit, width=3).grid(row=row, column=9, sticky="w", padx=(0, 6), pady=2)
+        ttk.Label(frm0, text="税率:").grid(row=row, column=10, sticky="e", padx=(6, 2), pady=2)
+        ttk.Entry(frm0, textvariable=self.inv_rate, width=5).grid(row=row, column=11, sticky="w", padx=(0, 6), pady=2)
         row += 1
         self.inv_tpl = tk.StringVar(value="")
-        ttk.Label(frm0, text="开票模板:").grid(row=row, column=0, sticky="e", padx=(8, 2), pady=3)
-        ttk.Entry(frm0, textvariable=self.inv_tpl, width=38).grid(row=row, column=1, columnspan=3, sticky="we", padx=(0, 6), pady=3)
-        ttk.Button(frm0, text="浏览…", command=lambda: self.pick(self.inv_tpl)).grid(row=row, column=4, sticky="w", padx=(0, 8), pady=3)
-        frm0.columnconfigure(1, weight=1)
-        frm0.columnconfigure(3, weight=1)
+        ttk.Label(frm0, text="开票模板:").grid(row=row, column=0, sticky="e", padx=(6, 2), pady=2)
+        ttk.Entry(frm0, textvariable=self.inv_tpl, width=50).grid(row=row, column=1, columnspan=9, sticky="we", padx=(0, 6), pady=2)
+        ttk.Button(frm0, text="浏览…", command=lambda: self.pick(self.inv_tpl)).grid(row=row, column=11, sticky="w", padx=(0, 8), pady=2)
 
         # 1. 可编辑发票表格 (每行一个输入框 = 每行一张发票)
         frm2 = ttk.LabelFrame(tab, text="发票录入表 — 双击单元格填写; 点选某列后Ctrl+V只粘该列; 整块复制自动对齐 (每行一张发票)")
@@ -1024,23 +1019,37 @@ class App:
         return [[c.value for c in row] for row in ws.iter_rows()]
 
     def _match_detail_columns(self, headers):
-        """按关键词匹配表头列(模糊)"""
+        """按关键词匹配表头列(模糊, type优先防冲突)"""
+        # 类型列优先精确匹配(排除发票类型等干扰)
+        type_found = None
+        type_kws = ["抬头类型", "购方类型", "买方类型", "抬头类别", "客户类型", "开票抬头类型"]
+        for i, h in enumerate(headers):
+            hl = h.lower()
+            if any(k.lower() in hl for k in type_kws):
+                type_found = i
+                break
+
         rules = {
-            "buyer": ["抬头", "购买方名称", "购方名称", "买方名称", "发票抬头"],
+            "buyer": ["购买方名称", "购方名称", "买方名称", "发票抬头", "抬头"],
             "tax_id": ["税号", "识别号", "纳税人"],
             "amount": ["发票金额", "金额", "价税合计", "合计金额"],
             "qty": ["商品数量", "数量"],
-            "type": ["抬头类型", "购方类型", "买方类型", "类型"],
         }
         col_map = {}
         for key, kws in rules.items():
             found = None
             for i, h in enumerate(headers):
                 hl = h.lower()
+                if i == type_found:
+                    continue  # 类型列不给其它字段用
+                # buyer 的"抬头"不匹配"抬头类型"类(已排除, 再防)
+                if key == "buyer" and ("类型" in h or "类别" in h):
+                    continue
                 if any(k.lower() in hl for k in kws):
                     found = i
                     break
             col_map[key] = found
+        col_map["type"] = type_found
         return col_map
 
     def invoice_auto_rows(self):
