@@ -106,9 +106,48 @@ def col_index_by_header(ws, header_row, header_name):
     return None
 
 
+def _tolerant_load(path, data_only=False):
+    """加载xlsx, 遇 Fill 样式错误自动修复 styles.xml 重载(快麦等导出文件兼容)"""
+    try:
+        return openpyxl.load_workbook(path, data_only=data_only)
+    except (TypeError, KeyError, IndexError) as e:
+        if "Fill" not in str(e) and "fill" not in str(e):
+            raise
+        # 修复 styles.xml 的 fills 段: 全部替换为默认 patternFill
+        import zipfile, tempfile, re as _re
+        tmp = tempfile.mktemp(suffix="_fix.xlsx")
+        try:
+            with zipfile.ZipFile(path) as zin:
+                with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zout:
+                    for n in zin.namelist():
+                        data = zin.read(n)
+                        if n == "xl/styles.xml":
+                            xml = data.decode("utf-8", errors="ignore")
+                            m = _re.search(r'<fills count="(\d+)">.*?</fills>', xml, _re.S)
+                            if m:
+                                cnt = int(m.group(1))
+                                if cnt <= 2:
+                                    new_fills = f'<fills count="{cnt}">' + "<fill><patternFill patternType=\"none\"/></fill>" * cnt + "</fills>"
+                                else:
+                                    new_fills = ('<fills count="' + str(cnt) + '">'
+                                                 '<fill><patternFill patternType="none"/></fill>'
+                                                 '<fill><patternFill patternType="gray125"/></fill>'
+                                                 + '<fill><patternFill patternType="none"/></fill>' * (cnt - 2)
+                                                 + '</fills>')
+                                xml = xml[:m.start()] + new_fills + xml[m.end():]
+                            data = xml.encode("utf-8")
+                        zout.writestr(n, data)
+            return openpyxl.load_workbook(tmp, data_only=data_only)
+        finally:
+            try:
+                os.remove(tmp)
+            except Exception:
+                pass
+
+
 def run_match(src_path, tgt_path, src_key, tgt_key, fill_map, sku_col, remark_col,
               skip_existing, progress_cb=None):
-    twb = openpyxl.load_workbook(tgt_path, data_only=True)
+    twb = _tolerant_load(tgt_path, data_only=True)
     tws = twb[twb.sheetnames[0]]
     thr = find_header_row(tws, [tgt_key])
     if thr is None:
@@ -132,7 +171,7 @@ def run_match(src_path, tgt_path, src_key, tgt_key, fill_map, sku_col, remark_co
             if part.strip():
                 idx[part.strip()].append(r)
 
-    swb = openpyxl.load_workbook(src_path)
+    swb = _tolerant_load(src_path)
     sws = swb[swb.sheetnames[0]]
     shr = find_header_row(sws, [src_key])
     if shr is None:
@@ -244,7 +283,7 @@ class App:
         try:
             root.title("电商工具 " + CURRENT_VERSION)
         except Exception:
-            root.title("电商工具 v6.3.9-Flex (灵活开票版) BY 大萝北拔萝卜")
+            root.title("电商工具 v6.4.0-Flex (灵活开票版) BY 大萝北拔萝卜")
         root.geometry("780x720")
         root.minsize(700, 640)
 
@@ -457,6 +496,7 @@ class App:
         frm3 = ttk.Frame(tab)
         frm3.pack(fill="x", padx=10, pady=5)
         ttk.Button(frm3, text="＋ 新增一行", command=self.invoice_add_row).pack(side="left", padx=5)
+        ttk.Button(frm3, text="📥 导入明细文档", command=self.invoice_import_detail).pack(side="left", padx=5)
         ttk.Button(frm3, text="删除选中行", command=self.invoice_del_sel).pack(side="left", padx=5)
         ttk.Button(frm3, text="清空选中列", command=self.invoice_clear_col).pack(side="left", padx=5)
         ttk.Button(frm3, text="清空", command=self.invoice_clear).pack(side="left", padx=5)
@@ -650,6 +690,8 @@ class App:
 
     def inv_click_col(self, event):
         """单击单元格 → 记录粘贴起点(行+列)。下次Ctrl+V从该格开始, 粘完自动恢复自动"""
+        # 单击时关闭残留编辑器(下拉/输入框)
+        self._inv_close_editor()
         region = self.inv_tree.identify("region", event.x, event.y)
         if region != "cell":
             return
@@ -710,9 +752,12 @@ class App:
                     self.invoices[idx][key2] = val
                 self.invoice_refresh_tree()
 
+            def cancel_combo(_=None):
+                self._inv_close_editor()
+
+            # 只绑选中保存; 不绑FocusOut(点下拉箭头展开列表会误触发导致关闭)
             combo.bind("<<ComboboxSelected>>", save_combo)
-            combo.bind("<FocusOut>", save_combo)
-            combo.bind("<Return>", save_combo)
+            combo.bind("<Escape>", cancel_combo)
             self._inv_editing = (combo, row_id, col_idx)
             combo.focus_set()
             return
@@ -916,6 +961,87 @@ class App:
                 x, y = bbox[0] + 2, bbox[1] + 2
                 self.inv_tree.event_generate("<Double-1>", x=x, y=y)
         self.log(self.inv_log, f"✔ 新增第 {len(self.invoices):03d} 行, 双击单元格填写或直接粘贴")
+
+    def invoice_import_detail(self):
+        """📥 导入发票明细文档(Excel/CSV), 自动映射列并加入发票列表
+        映射: 发票抬头→购买方名称, 企业税号→纳税人识别号,
+              发票金额→金额, 商品数量→数量
+              抬头类型=个人→自然人"是"
+        """
+        path = filedialog.askopenfilename(
+            title="选择发票明细文档",
+            filetypes=[("Excel/CSV", "*.xlsx *.xlsm *.csv"), ("所有文件", "*.*")])
+        if not path:
+            return
+        try:
+            rows = self._read_detail(path)
+            if not rows:
+                _mtop('showwarning', "提示", "文档无数据或无法识别表头")
+                return
+            head = rows[0]
+            headers = [str(h or "").strip() for h in head]
+            col_map = self._match_detail_columns(headers)
+            missing = [n for n, ci in col_map.items() if ci is None]
+            if missing:
+                _mtop('showwarning', "提示", f"以下列未识别(请检查表头):\n{', '.join(missing)}")
+            n = 0
+            for r in rows[1:]:
+                buyer = str(r[col_map["buyer"]] or "").strip() if col_map["buyer"] is not None else ""
+                if not buyer:
+                    continue
+                inv = {
+                    "invoice_type": self.inv_type.get(),
+                    "tax_included": self.inv_taxinc.get(),
+                    "buyer": buyer,
+                    "tax_id": str(r[col_map["tax_id"]] or "").strip() if col_map["tax_id"] is not None else "",
+                    "is_natural": "",
+                    "qty": str(r[col_map["qty"]] or "").strip() if col_map["qty"] is not None else "",
+                    "amount": str(r[col_map["amount"]] or "").strip() if col_map["amount"] is not None else "",
+                    "remark": "",
+                }
+                if col_map["type"] is not None:
+                    t = str(r[col_map["type"]] or "").strip()
+                    if t and ("个人" in t or "自然人" in t):
+                        inv["is_natural"] = "是"
+                self.invoices.append(inv)
+                n += 1
+            self.invoice_refresh_tree()
+            self.log(self.inv_log, f"✅ 已导入 {n} 条发票明细: {os.path.basename(path)}")
+            _mtop('showinfo', "成功", f"已导入 {n} 条发票明细")
+        except Exception as e:
+            self.log(self.inv_log, f"❌ 导入失败: {e}")
+            _mtop('showerror', "错误", f"导入失败:\n{e}")
+
+    def _read_detail(self, path):
+        """读取明细文档(csv/xlsx)为二维列表, 首行表头"""
+        ext = os.path.splitext(path)[1].lower()
+        if ext == ".csv":
+            import csv as _csv
+            with open(path, "r", encoding="utf-8-sig", errors="ignore") as f:
+                return list(_csv.reader(f))
+        wb = openpyxl.load_workbook(path, data_only=True)
+        ws = wb[wb.sheetnames[0]]
+        return [[c.value for c in row] for row in ws.iter_rows()]
+
+    def _match_detail_columns(self, headers):
+        """按关键词匹配表头列(模糊)"""
+        rules = {
+            "buyer": ["抬头", "购买方名称", "购方名称", "买方名称", "发票抬头"],
+            "tax_id": ["税号", "识别号", "纳税人"],
+            "amount": ["发票金额", "金额", "价税合计", "合计金额"],
+            "qty": ["商品数量", "数量"],
+            "type": ["抬头类型", "购方类型", "买方类型", "类型"],
+        }
+        col_map = {}
+        for key, kws in rules.items():
+            found = None
+            for i, h in enumerate(headers):
+                hl = h.lower()
+                if any(k.lower() in hl for k in kws):
+                    found = i
+                    break
+            col_map[key] = found
+        return col_map
 
     def invoice_auto_rows(self):
         """按粘贴的金额列自动生成行: 一键生成N行(每行一个金额)"""
@@ -1288,8 +1414,15 @@ class App:
                     self.log(self.match_log, f"   ... 等 {len(notfound)} 个")
             _mtop('showinfo', "成功", f"核对完成!\n匹配 {matched}\n多规格 {multi}\n未匹配 {len(notfound)}")
         except Exception as e:
-            self.log(self.match_log, f"❌ 错误: {e}")
-            _mtop('showerror', "错误", str(e))
+            msg = str(e)
+            self.log(self.match_log, f"❌ 错误: {msg}")
+            if "Fill" in msg:
+                _mtop('showerror', "文件格式问题",
+                      "表格文件样式异常(不兼容的填充格式)。\n\n"
+                      "解决办法: 用 WPS/Excel 打开该文件 → 另存为 .xlsx 后重试。\n\n"
+                      f"详细: {msg}")
+            else:
+                _mtop('showerror', "错误", msg)
         finally:
             self.run_btn.config(state="normal")
 
